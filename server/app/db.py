@@ -9,6 +9,20 @@ def env(name: str, default=None):
     return os.environ.get("PIP_" + name, default)
 
 
+# The hosted instance's domain. THE single hosted-vs-self-hosted check:
+# a deployment is "hosted" iff PIP_BASE_URL points at this domain.
+# Everything hosted-only (waitlist signup, landing/privacy page copy)
+# branches on hosted() — never on a second flag. The firmware twin is
+# config_is_hosted() in firmware/main/config.c.
+HOSTED_DOMAIN = "pipvoice.com"
+
+
+def hosted() -> bool:
+    host = (env("BASE_URL", "") or "") \
+        .split("//")[-1].split("/")[0].split(":")[0].lower()
+    return host == HOSTED_DOMAIN or host.endswith("." + HOSTED_DOMAIN)
+
+
 DATA_DIR = env("DATA", "/opt/pipvoice/data")
 DB_PATH = os.path.join(DATA_DIR, "pip.db")
 AUDIO_DIR = os.path.join(DATA_DIR, "audio")

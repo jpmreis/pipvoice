@@ -36,6 +36,11 @@ extern app_config_t g_cfg;
 
 void config_load(void);
 
+/* True iff this box is provisioned against the hosted instance
+ * (pipvoice.com) rather than a self-hosted server. The single place
+ * firmware may branch hosted-vs-self-hosted; server twin: db.hosted(). */
+bool config_is_hosted(void);
+
 /* WiFi credential store: every network ever used, most-recent-first.
  * config_save_wifi() upserts to the front and becomes the active network
  * (g_cfg.wifi_ssid/pass mirror entry 0). No network is seeded by default:

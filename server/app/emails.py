@@ -6,6 +6,7 @@ import os
 import jinja2
 
 from . import db, notify
+from .auth import LOCAL_AUTH
 
 _env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(
@@ -42,12 +43,15 @@ def send_install(user_id: int) -> bool:
     first = u["display_name"].split()[0] if u["display_name"] else "there"
     base = _base_url()
     subject = f"{first}, your family has a walkie-talkie now"
+    # with local passwords on (self-host) the "no password" boast is a lie
+    coda = ("That's it.\n" if LOCAL_AUTH else
+            "That's it.\nNo password. Passwords are for banks.\n")
     text = (f"Hello {first}!\n\n"
             "Your family put a little voice-message app called Pip on the\n"
             "internet, and your spot in it is ready.\n\n"
             f"Set it up here: {base}/install\n\n"
             f"When Pip asks who you are, use this email address\n"
-            f"({u['email']}) - it will send you a 6-digit code. That's it.\n"
-            "No password. Passwords are for banks.\n")
-    html = _render("install.html", first=first, email=u["email"])
+            f"({u['email']}) - it will send you a 6-digit code. {coda}")
+    html = _render("install.html", first=first, email=u["email"],
+                   local_auth=LOCAL_AUTH)
     return notify.send_email(user_id, subject, text, html=html)

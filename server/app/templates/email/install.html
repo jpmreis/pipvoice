@@ -17,8 +17,9 @@ and waiting for you:</p>
 </table>
 <p style="margin:0 0 4px;font-weight:700;">Then sign in</p>
 <p style="margin:0;color:#5A5A64;">When Pip asks who you are, type this
-email address (<b>{{ email }}</b>) and we'll send you a 6-digit code.
-That's the whole thing. No password. Passwords are for banks.</p>
+email address (<b>{{ email }}</b>) and it will send you a 6-digit code.
+That's the whole thing.{% if not local_auth %} No password. Passwords
+are for banks.{% endif %}</p>
 {% endblock %}
 {% block footer %}You're getting this because someone in your family
 pressed a shiny yellow button with your name on it.{% endblock %}

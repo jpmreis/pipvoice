@@ -29,6 +29,22 @@ static uint32_t get_u32(nvs_handle_t h, const char *key, uint32_t dflt)
     return v;
 }
 
+/* THE single hosted-vs-self-hosted check on the firmware side: this box
+ * talks to the hosted instance iff its provisioned server URL points at
+ * pipvoice.com. The server twin is hosted() in server/app/db.py. */
+bool config_is_hosted(void)
+{
+    const char *host = strstr(g_cfg.server_base, "//");
+    host = host ? host + 2 : g_cfg.server_base;
+    const char *dom = strstr(host, "pipvoice.com");
+    if (!dom) return false;
+    /* the match must be the whole host (or a subdomain of it), not a
+     * substring of some other domain, and must end where the host ends */
+    if (dom != host && dom[-1] != '.') return false;
+    char end = dom[strlen("pipvoice.com")];
+    return end == '\0' || end == '/' || end == ':';
+}
+
 /* ---------------- WiFi credential store ---------------- */
 static int wifi_find(const char *ssid)
 {

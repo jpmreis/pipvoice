@@ -57,24 +57,26 @@ async def _start_cleanup():
 
 @functools.lru_cache(maxsize=None)
 def _public_page(name: str) -> str:
-    """web/ pages carry no hardcoded domain; __BASE__/__HOST__ tokens are
-    filled from PIP_BASE_URL so the same tree serves any deployment.
-    <!--if-waitlist--> / <!--if-no-waitlist--> blocks are kept or dropped
-    by the PIP_WAITLIST flag (self-hosted instances have no signup)."""
+    """pages/ live outside the /app static mount because they are served
+    processed: __BASE__/__HOST__ tokens are filled from PIP_BASE_URL so
+    the same tree serves any deployment, and <!--if-hosted--> /
+    <!--if-selfhost--> blocks are kept or dropped by db.hosted() (a
+    self-hosted family's pages must not carry the hosted instance's
+    claims — waitlist, who runs the server, providers)."""
     base = db.env("BASE_URL", "").rstrip("/")
     host = base.split("//")[-1] or "this server"
-    path = os.path.join(os.path.dirname(__file__), "web", name)
+    path = os.path.join(os.path.dirname(__file__), "pages", name)
     with open(path, encoding="utf-8") as f:
         page = f.read().replace("__BASE__", base).replace("__HOST__", host)
-    drop = "no-waitlist" if api.WAITLIST else "waitlist"
+    drop = "selfhost" if db.hosted() else "hosted"
     return re.sub(rf"<!--if-{drop}-->.*?<!--end-{drop}-->", "", page,
                   flags=re.S)
 
 
 @app.get("/")
 def root():
-    """Public landing page. Lives in web/ so the deploy copy step picks it
-    up, but is served at / — outside the PWA's /app/ manifest scope."""
+    """Public landing page. Lives in pages/ (processed, see _public_page)
+    and is served at / — outside the PWA's /app/ manifest scope."""
     return HTMLResponse(_public_page("home.html"))
 
 
@@ -95,13 +97,13 @@ def privacy():
 
 @app.get("/waitlist")
 def waitlist():
-    """Public waitlist signup page (form posts to /v1/waitlist). Hidden
-    entirely unless PIP_WAITLIST=1 — self-hosted families have no public
-    signup; the admin adds users by hand."""
-    if not api.WAITLIST:
+    """Public waitlist signup page (form posts to /v1/waitlist). Hosted
+    instance only — a self-hosted family has no public signup; the admin
+    adds users by hand."""
+    if not db.hosted():
         raise HTTPException(404, "waitlist is not enabled")
     return FileResponse(
-        os.path.join(os.path.dirname(__file__), "web", "waitlist.html"))
+        os.path.join(os.path.dirname(__file__), "pages", "waitlist.html"))
 
 
 @app.get("/healthz")

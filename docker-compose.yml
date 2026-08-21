@@ -24,9 +24,6 @@ services:
       PIP_SMTP_USER: ${PIP_SMTP_USER:-}
       PIP_SMTP_PASS: ${PIP_SMTP_PASS:-}
       PIP_SMTP_FROM: ${PIP_SMTP_FROM:-}
-      # public waitlist signups (the hosted instance); self-hosts leave
-      # this unset — the admin adds users by hand
-      PIP_WAITLIST: ${PIP_WAITLIST:-}
     volumes:
       - pip-data:/data
       - mosquitto-auth:/mosquitto-auth

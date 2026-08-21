@@ -23,11 +23,6 @@ router = APIRouter(prefix="/v1")
 
 log = logging.getLogger("api")
 
-# Public waitlist signups are opt-in (PIP_WAITLIST=1, used by the hosted
-# instance). Self-hosted deployments leave it off: the admin creates every
-# user by hand in /admin, and the landing page / signup endpoints hide.
-WAITLIST = db.env("WAITLIST", "") == "1"
-
 MAX_AUDIO_BYTES = 4 * 1024 * 1024
 MAX_MSG_S = int(db.env("MAX_MSG_S", "90"))   # mirrors device max_message_s
 RATE_MSGS = 5          # per sender->recipient pair ...
@@ -121,9 +116,9 @@ def _login_response(u) -> JSONResponse:
 def auth_methods():
     """Unauthenticated: tells login screens what to offer. Email codes
     need SMTP; passwords need PIP_LOCAL_AUTH=1 (self-host); the waitlist
-    link only exists on hosted instances (PIP_WAITLIST=1)."""
+    link only exists on the hosted instance (db.hosted())."""
     return {"code": bool(db.env("SMTP_HOST", "")), "password": LOCAL_AUTH,
-            "waitlist": WAITLIST}
+            "waitlist": db.hosted()}
 
 
 @router.post("/auth/login-password")
@@ -203,9 +198,10 @@ def _waitlist_notify_admins(addr: str) -> None:
 @router.post("/waitlist")
 def waitlist_join(request: Request, background: BackgroundTasks,
                   email: str = Form(...)):
-    """Public waitlist signup. Same limiter as login; the response is
-    identical whether or not the address was already listed."""
-    if not WAITLIST:
+    """Public waitlist signup (hosted instance only). Same limiter as
+    login; the response is identical whether or not the address was
+    already listed."""
+    if not db.hosted():
         raise HTTPException(404, "waitlist is not enabled")
     rl_key = f"waitlist:{client_ip(request)}"
     if login_blocked(rl_key):
