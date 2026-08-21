@@ -265,6 +265,8 @@ async function applyAuthMethods() {
   // (and hides entirely when the server has no SMTP to send codes with)
   $("login-send").style.display = authMethods.code ? "" : "none";
   $("login-send").className = pw ? "btn ghost small" : "btn accent";
+  // self-hosted servers have no public signup: the admin adds users by hand
+  $("login-waitlist").style.display = authMethods.waitlist ? "flex" : "none";
 }
 async function passwordSignIn() {
   $("login-err").textContent = "";

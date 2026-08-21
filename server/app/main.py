@@ -1,10 +1,11 @@
 """Pip server. Run: uvicorn app.main:app --host 127.0.0.1 --port 8080"""
 import logging
 import os
+import re
 
 import functools
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -57,12 +58,17 @@ async def _start_cleanup():
 @functools.lru_cache(maxsize=None)
 def _public_page(name: str) -> str:
     """web/ pages carry no hardcoded domain; __BASE__/__HOST__ tokens are
-    filled from PIP_BASE_URL so the same tree serves any deployment."""
+    filled from PIP_BASE_URL so the same tree serves any deployment.
+    <!--if-waitlist--> / <!--if-no-waitlist--> blocks are kept or dropped
+    by the PIP_WAITLIST flag (self-hosted instances have no signup)."""
     base = db.env("BASE_URL", "").rstrip("/")
     host = base.split("//")[-1] or "this server"
     path = os.path.join(os.path.dirname(__file__), "web", name)
     with open(path, encoding="utf-8") as f:
-        return f.read().replace("__BASE__", base).replace("__HOST__", host)
+        page = f.read().replace("__BASE__", base).replace("__HOST__", host)
+    drop = "no-waitlist" if api.WAITLIST else "waitlist"
+    return re.sub(rf"<!--if-{drop}-->.*?<!--end-{drop}-->", "", page,
+                  flags=re.S)
 
 
 @app.get("/")
@@ -89,7 +95,11 @@ def privacy():
 
 @app.get("/waitlist")
 def waitlist():
-    """Public waitlist signup page (form posts to /v1/waitlist)."""
+    """Public waitlist signup page (form posts to /v1/waitlist). Hidden
+    entirely unless PIP_WAITLIST=1 — self-hosted families have no public
+    signup; the admin adds users by hand."""
+    if not api.WAITLIST:
+        raise HTTPException(404, "waitlist is not enabled")
     return FileResponse(
         os.path.join(os.path.dirname(__file__), "web", "waitlist.html"))
 

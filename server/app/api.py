@@ -2,13 +2,15 @@
 tokens (cookie or Bearer) through the same identity abstraction — a
 message always flows user -> user, so the sender's client never matters."""
 import hashlib
+import logging
 import os
 import re
 import secrets
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Form, HTTPException, Request, UploadFile
+from fastapi import (APIRouter, BackgroundTasks, Body, Form, HTTPException,
+                     Request, UploadFile)
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from . import db, emails, mqtt, notify, presence, provision, push, themes, vmsg
@@ -18,6 +20,13 @@ from .auth import (LOCAL_AUTH, AuthDep, Identity, client_ip, create_session,
                    user_by_email, verify_password)
 
 router = APIRouter(prefix="/v1")
+
+log = logging.getLogger("api")
+
+# Public waitlist signups are opt-in (PIP_WAITLIST=1, used by the hosted
+# instance). Self-hosted deployments leave it off: the admin creates every
+# user by hand in /admin, and the landing page / signup endpoints hide.
+WAITLIST = db.env("WAITLIST", "") == "1"
 
 MAX_AUDIO_BYTES = 4 * 1024 * 1024
 MAX_MSG_S = int(db.env("MAX_MSG_S", "90"))   # mirrors device max_message_s
@@ -111,8 +120,10 @@ def _login_response(u) -> JSONResponse:
 @router.get("/auth/methods")
 def auth_methods():
     """Unauthenticated: tells login screens what to offer. Email codes
-    need SMTP; passwords need PIP_LOCAL_AUTH=1 (self-host)."""
-    return {"code": bool(db.env("SMTP_HOST", "")), "password": LOCAL_AUTH}
+    need SMTP; passwords need PIP_LOCAL_AUTH=1 (self-host); the waitlist
+    link only exists on hosted instances (PIP_WAITLIST=1)."""
+    return {"code": bool(db.env("SMTP_HOST", "")), "password": LOCAL_AUTH,
+            "waitlist": WAITLIST}
 
 
 @router.post("/auth/login-password")
@@ -169,10 +180,33 @@ def verify_code(request: Request, email: str = Form(...),
 _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
 
 
+def _waitlist_notify_admins(addr: str) -> None:
+    """Heads-up mail to every admin with an email on file. Best-effort:
+    the signup row is already stored either way."""
+    with db.conn() as c:
+        admins = db.all_(c, """SELECT id FROM users
+                               WHERE is_admin=1 AND email IS NOT NULL
+                                 AND email!=''""")
+    if not admins:
+        log.warning("waitlist signup: no admin has an email address set, "
+                    "nobody was notified")
+        return
+    for a in admins:
+        notify.send_email(
+            a["id"], "New Pip waitlist signup",
+            f"Someone joined the Pip waitlist: {addr}\n\n"
+            "Signups live in the waitlist table; add them as a user from\n"
+            f"{notify.app_url().replace('/app/', '/admin')} when a spot "
+            "opens up.\n")
+
+
 @router.post("/waitlist")
-def waitlist_join(request: Request, email: str = Form(...)):
+def waitlist_join(request: Request, background: BackgroundTasks,
+                  email: str = Form(...)):
     """Public waitlist signup. Same limiter as login; the response is
     identical whether or not the address was already listed."""
+    if not WAITLIST:
+        raise HTTPException(404, "waitlist is not enabled")
     rl_key = f"waitlist:{client_ip(request)}"
     if login_blocked(rl_key):
         raise HTTPException(429, "too many attempts - try again later")
@@ -181,7 +215,10 @@ def waitlist_join(request: Request, email: str = Form(...)):
     if len(addr) > 254 or not _EMAIL_RE.fullmatch(addr):
         raise HTTPException(400, "not a valid email address")
     with db.conn() as c:
-        c.execute("INSERT OR IGNORE INTO waitlist (email) VALUES (?)", (addr,))
+        new = c.execute("INSERT OR IGNORE INTO waitlist (email) VALUES (?)",
+                        (addr,)).rowcount > 0
+    if new:   # repeat submits of a listed address don't re-mail the admins
+        background.add_task(_waitlist_notify_admins, addr)
     return {"ok": True}
 
 
