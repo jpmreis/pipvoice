@@ -1,0 +1,51 @@
+# Auto-reply and close incoming pull requests.
+#
+# Pip is open source under a closed-contribution policy (see README
+# "License and contributions"): issues are welcome, PRs are not
+# reviewed or merged. This workflow posts a friendly explanation and
+# closes each new PR.
+#
+# Uses pull_request_target so it runs with write permissions on PRs
+# from forks; it never checks out or executes PR code, so that's safe.
+
+name: Close pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment and close
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              "Thanks for taking the time to put this together — and sorry for the automated reply.",
+              "",
+              "Pip is **open source with a closed-contribution policy** (see the [License and contributions](https://github.com/${{ github.repository }}#license-and-contributions) section of the README): it's a personal spare-time project and I keep the maintenance surface small, so **pull requests are not reviewed or merged**. This PR is being closed automatically.",
+              "",
+              "What *is* welcome:",
+              "- **Bug reports and questions** in the [issue tracker](https://github.com/${{ github.repository }}/issues) — if this PR fixes a bug, please open an issue describing it so the fix isn't lost.",
+              "- **Security reports** through the [private vulnerability form](https://github.com/${{ github.repository }}/security/advisories/new) (see `SECURITY.md`).",
+              "- **Forks** — the AGPL-3.0 lets you take the project wherever you want it to go.",
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              state: "closed",
+            });
