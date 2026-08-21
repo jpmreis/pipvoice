@@ -1,0 +1,40 @@
+{
+    auto_https off
+}
+http://DOMAIN, http://www.DOMAIN {
+    @acme path /.well-known/acme-challenge/*
+    handle @acme {
+        root * /var/www/acme
+        file_server
+    }
+    handle {
+        redir https://DOMAIN{uri} 308
+    }
+}
+# www is redirect-only: one canonical host keeps the PWA scope, service
+# worker and session cookie on the apex. Cert must carry both SANs
+# (certbot --expand -d DOMAIN -d www.DOMAIN).
+https://www.DOMAIN {
+    tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key
+    header Strict-Transport-Security "max-age=31536000"
+    redir https://DOMAIN{uri} 308
+}
+https://DOMAIN {
+    tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+    }
+    # fonts never change; icons rarely. Everything else stays ETag-only.
+    @fonts path /app/fonts/*
+    header @fonts Cache-Control "public, max-age=31536000, immutable"
+    @icons path /app/icons/*
+    header @icons Cache-Control "public, max-age=2592000"
+    reverse_proxy 127.0.0.1:8080
+    request_body {
+        max_size 8MB
+    }
+}

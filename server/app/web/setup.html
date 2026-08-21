@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Set up a new Pip</title>
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+<style>
+  .step { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .step .dot { width: 26px; height: 26px; border-radius: 50%; flex: none;
+    background: var(--surface2); color: var(--dim); display: flex;
+    align-items: center; justify-content: center; font-size: 14px;
+    font-weight: 700; }
+  .step.act .dot { background: var(--accent); color: #000; }
+  .step.ok .dot { background: var(--ok); color: #000; }
+  .step.err .dot { background: var(--danger); color: #000; }
+  .step .lbl { flex: 1; }
+  .step.dimmed { color: var(--dim); }
+  #fl-bar { height: 8px; border-radius: 4px; background: var(--surface2);
+    overflow: hidden; margin: 12px 0; display: none; }
+  #fl-bar > div { height: 100%; width: 0; background: var(--accent); }
+  #fl-detail { min-height: 20px; }
+  .devrow { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
+  .devrow .who { flex: 1; }
+  .devrow button { width: auto; padding: 0 16px; height: 44px; margin: 0; }
+  label.fld { display: block; margin: 10px 0 2px; font-size: var(--fs-small);
+    color: var(--dim); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<section class="on">
+  <div class="wordmark" style="margin:48px 0 8px"><span>P</span><span>i</span><span>p</span><span class="dot"></span></div>
+  <h1 style="text-align:center;margin:0 0 24px">Set up a new Pip</h1>
+
+  <div id="st-unsupported" class="card" style="display:none">
+    <p>Flashing a Pip needs a <b>computer</b> running <b>Chrome</b> or
+    <b>Edge</b> (the browser has to talk to the box over USB).</p>
+    <p class="dim small">Open this page there:
+    <b><span id="uns-url"></span></b></p>
+  </div>
+
+  <div id="st-login" class="card" style="display:none">
+    <p>You need to be signed in to Pip first.</p>
+    <a href="./" class="btn accent" style="display:block;text-align:center;
+       text-decoration:none;line-height:56px;color:#000">Open Pip and sign in</a>
+  </div>
+
+  <div id="st-start" style="display:none">
+    <div class="card">
+      <p style="margin-top:0">Who is this Pip for? They get their own name
+      in the family - you manage the box and its contacts from your app.</p>
+      <label class="fld" for="nu-name">Name (shown on the box)</label>
+      <input id="nu-name" maxlength="23" placeholder="Ella" autocomplete="off">
+      <label class="fld" for="nu-user">Username (how contacts add them)</label>
+      <input id="nu-user" maxlength="24" placeholder="ella" autocomplete="off"
+             autocapitalize="none" spellcheck="false">
+      <label class="fld" for="nu-pin">Settings PIN (4 digits, guards the box's
+      settings screen)</label>
+      <input id="nu-pin" maxlength="4" inputmode="numeric" pattern="\d{4}"
+             placeholder="1234" autocomplete="off">
+      <label class="fld" for="nu-server">Server URL (written to the box)</label>
+      <input id="nu-server" autocomplete="off" autocapitalize="none"
+             spellcheck="false">
+      <p class="small dim" style="margin-top:4px">Prefilled with this
+      server. Change it only if the box should reach the server at a
+      different address (self-host bench setups) &mdash; boxes need
+      <b>https</b> with a real certificate outside the LAN.</p>
+      <p class="small dim mng-err" id="nu-err"></p>
+      <button class="btn accent" id="nu-create">Make it a Pip</button>
+    </div>
+    <div class="card" id="resume-card" style="display:none">
+      <div class="small dim" style="font-weight:600;margin-bottom:4px">
+        FLASH AN EXISTING PIP</div>
+      <p class="small dim" style="margin-top:4px">For a setup that didn't
+      finish, or to re-flash a box. This gives the box <b>new
+      credentials</b>: it must complete flashing before it can talk to the
+      server again.</p>
+      <div id="resume-list"></div>
+      <p class="small dim mng-err" id="re-err"></p>
+    </div>
+  </div>
+
+  <div id="st-flash" style="display:none">
+    <div class="card">
+      <p style="margin-top:0">Flashing <b id="fl-name"></b>
+      <span class="dim">(<span id="fl-device"></span>)</span></p>
+      <div class="step" id="stp-connect"><div class="dot">1</div>
+        <div class="lbl">Plug the box in over USB and connect</div></div>
+      <div class="step dimmed" id="stp-check"><div class="dot">2</div>
+        <div class="lbl">Check the board</div></div>
+      <div class="step dimmed" id="stp-flash"><div class="dot">3</div>
+        <div class="lbl">Install Pip</div></div>
+      <div class="step dimmed" id="stp-verify"><div class="dot">4</div>
+        <div class="lbl">Watch it start up</div></div>
+      <div id="fl-bar"><div></div></div>
+      <p class="small dim" id="fl-detail"></p>
+      <button class="btn accent" id="fl-connect">Connect the box</button>
+      <button class="btn ghost small" id="fl-anyport" style="display:none">
+        My device isn't listed</button>
+      <button class="btn ghost small" id="fl-back" style="display:none">
+        Start over</button>
+    </div>
+  </div>
+
+  <div id="st-done" style="display:none">
+    <div class="card">
+      <p style="margin-top:0"><b>All done!</b> <span id="dn-notes"></span></p>
+      <p>The box now shows a <b>QR code</b>. Scan it with a phone to connect
+      the box to your home WiFi - a setup page opens by itself.</p>
+      <p class="small dim" id="dn-online">Waiting for the box to come
+      online…</p>
+      <p class="dim small">Add more family members to the box any time from
+      the app: Settings &rarr; Manage device.</p>
+      <a href="./" class="btn" style="display:block;text-align:center;
+         text-decoration:none;line-height:56px;color:var(--text)">Back to Pip</a>
+    </div>
+  </div>
+</section>
+
+<script type="module" src="setup.js"></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pip setup</title><style>
+body{font-family:system-ui;background:#000;color:#f2f0ea;margin:0;padding:24px;
+max-width:420px;margin-inline:auto;text-align:center}
+.logo{font-size:56px;font-weight:800;letter-spacing:-2px;margin:28px 0 0}
+.logo em{font-style:normal;color:#ffb300}
+.sub{color:#8b8b96;margin:6px 0 26px}
+.card{background:#16161c;border-radius:18px;padding:20px;text-align:left}
+label{font-size:13px;color:#8b8b96;display:block;margin:10px 2px 4px}
+select,input{width:100%;box-sizing:border-box;padding:14px;border-radius:12px;
+border:1px solid #24242e;background:#0c0c10;color:#f2f0ea;font-size:16px}
+button{width:100%;box-sizing:border-box;padding:15px;margin-top:18px;border-radius:12px;
+border:0;background:#ffb300;color:#000;font-weight:700;font-size:16px}
+button:active{opacity:.8}
+#msg{min-height:24px;margin-top:14px}.ok{color:#3ddc84}.err{color:#ff5252}
+.foot{color:#8b8b96;font-size:12px;margin-top:26px}</style></head><body>
+<div class="logo">Pip<em>.</em></div>
+<p class="sub">Let's get your Pip online</p>
+<div class="card">
+<label for="ssid">WiFi network</label>
+<select id="ssid" onchange="passvis()"><option>Scanning...</option></select>
+<div id="passrow">
+<label for="pass">Password</label>
+<input id="pass" type="password" placeholder="WiFi password">
+</div>
+<button onclick="save()">Connect</button>
+<p id="msg"></p>
+</div>
+<p class="foot">Keep this page open until your Pip is connected.</p>
+<script>
+let nets=[],poll,portalShown=false;
+fetch('/scan').then(r=>r.json()).then(list=>{
+  nets=list;
+  const s=document.getElementById('ssid');s.innerHTML='';
+  list.forEach(n=>{const o=document.createElement('option');o.textContent=n.n;s.append(o)});
+  passvis();
+}).catch(()=>{document.getElementById('msg').innerHTML='<span class=err>Scan failed - reload</span>'});
+function passvis(){
+  const n=nets[ssid.selectedIndex];
+  document.getElementById('passrow').style.display=(n&&n.o)?'none':'';
+}
+function save(){
+  const n=nets[ssid.selectedIndex];
+  const body=new URLSearchParams({ssid:ssid.value,pass:(n&&n.o)?'':pass.value});
+  fetch('/save',{method:'POST',body}).then(()=>{
+    portalShown=false;
+    msg('Connecting your Pip...');
+    clearInterval(poll);
+    poll=setInterval(check,2000);
+  });
+}
+function msg(html){document.getElementById('msg').innerHTML=html}
+function check(){
+  fetch('/status').then(r=>r.json()).then(s=>{
+    if(s.state==='online'){
+      clearInterval(poll);
+      msg('<span class=ok>Connected! You can close this page.</span>');
+    }else if(s.state==='portal'){
+      if(!portalShown){
+        portalShown=true;
+        const u=s.url||'http://neverssl.com';
+        msg('This network needs a sign-in.<br>'+
+            '<a style="color:#ffb300" href="'+u+'">Tap here to open it</a> '+
+            '(or use the sign-in window if one pops up).<br>'+
+            'Once you sign in, your Pip goes online by itself.');
+      } /* keep polling: flips to Connected! after the sign-in */
+    }else if(s.state==='failed'){
+      clearInterval(poll);
+      portalShown=false;
+      msg('<span class=err>Could not join - check the password and try again.</span>');
+    }else if(!portalShown){
+      msg('Connecting your Pip...');
+    }
+  }).catch(()=>{});
+}
+</script></body></html>

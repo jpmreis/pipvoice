@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<p style="margin:0 0 16px;">Hello {{ first }}! &#128075;</p>
+<p style="margin:0 0 20px;">Here's your Pip sign-in code. It's shy: it
+only works once, and it flies away in <b>10 minutes</b>.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td align="center" style="background-color:#FFF3D6;border-radius:16px;
+    padding:20px 12px;">
+  <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;
+        font-size:38px;font-weight:700;letter-spacing:10px;
+        color:#1B1B1F;padding-left:10px;">{{ code }}</span>
+</td></tr>
+</table>
+<p style="margin:20px 0 0;color:#8B8B96;font-size:14px;">
+Didn't ask for a code? Then someone in the family fat-fingered their own
+email. You can safely ignore this and get on with your day.</p>
+{% endblock %}
+{% block footer %}This code was requested from the Pip app just now.
+{% endblock %}

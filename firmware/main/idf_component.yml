@@ -1,0 +1,6 @@
+version: "0.1.0"
+dependencies:
+  idf: ">=5.4"   # the Waveshare BSP's display driver (esp_lcd_co5300 2.x) needs 5.4
+  waveshare/esp32_s3_touch_amoled_1_8: "^2.0.3"   # display+touch+LVGL9+codec BSP
+  joltwallet/littlefs: "^1.14.0"
+  lvgl/lvgl: "^9.2.0"

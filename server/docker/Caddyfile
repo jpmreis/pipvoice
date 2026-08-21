@@ -1,0 +1,22 @@
+# Caddy fronts the app and does Let's Encrypt automatically for $DOMAIN.
+# Mirrors the bare-VPS server/Caddyfile (minus the certbot plumbing —
+# Caddy manages certs itself here; mosquitto borrows them, see
+# mosquitto-entrypoint.sh).
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+	# fonts never change; icons rarely. Everything else stays ETag-only.
+	@fonts path /app/fonts/*
+	header @fonts Cache-Control "public, max-age=31536000, immutable"
+	@icons path /app/icons/*
+	header @icons Cache-Control "public, max-age=2592000"
+	reverse_proxy app:8080
+	request_body {
+		max_size 8MB
+	}
+}

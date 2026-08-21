@@ -1,0 +1,3 @@
+[submodule "firmware/components/opus/opus"]
+	path = firmware/components/opus/opus
+	url = https://github.com/xiph/opus.git

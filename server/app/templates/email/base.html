@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Pip</title>
+</head>
+<body style="margin:0;padding:0;background-color:#FFF6E3;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+       style="background-color:#FFF6E3;">
+<tr><td align="center" style="padding:32px 16px 40px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+         style="max-width:440px;">
+  <!-- wordmark -->
+  <tr><td align="center" style="padding:8px 0 24px;
+      font-family:Montserrat,-apple-system,'Segoe UI',sans-serif;">
+    <span style="font-size:34px;font-weight:800;color:#1B1B1F;
+          letter-spacing:-1px;">Pip</span><span
+          style="font-size:34px;font-weight:800;color:#FFB300;">.</span>
+  </td></tr>
+  <!-- card -->
+  <tr><td style="background-color:#FFFFFF;border-radius:20px;
+      padding:32px 28px;font-family:Montserrat,-apple-system,'Segoe UI',
+      sans-serif;color:#1B1B1F;font-size:16px;line-height:1.6;">
+    {% block content %}{% endblock %}
+  </td></tr>
+  <!-- footer -->
+  <tr><td align="center" style="padding:24px 12px 0;
+      font-family:Montserrat,-apple-system,'Segoe UI',sans-serif;
+      font-size:12px;line-height:1.6;color:#A89F8D;">
+    {% block footer %}{% endblock %}
+    <br>Sent with <span style="color:#FFB300;">&#9829;</span> by Pip
+    &middot; <a href="{{ base }}" style="color:#A89F8D;">{{ base | replace("https://", "") | replace("http://", "") }}</a>
+  </td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>

@@ -1,0 +1,50 @@
+{% extends "base.html" %}{% block content %}
+<h1>{{ "Create admin account" if bootstrap else "Sign in" }}</h1>
+{% if bootstrap %}<p class="muted">First run: this account becomes the administrator.</p>{% endif %}
+{% if error %}<p class="bad">{{ error }}</p>{% endif %}
+{% if bootstrap %}
+<form method="post" class="card" style="max-width:340px">
+<input type="hidden" name="action" value="bootstrap">
+<input name="username" placeholder="username" required><br>
+<input name="display_name" placeholder="Display name"><br>
+{% if local_auth %}
+<input name="email" type="email" placeholder="email (your sign-in id)" required><br>
+<input name="password" type="password" minlength="8"
+       placeholder="password (min 8 chars)" required><br>
+{% else %}
+<input name="email" type="email" placeholder="email (sign-in codes go here)" required><br>
+{% endif %}
+<button>Create &amp; sign in</button></form>
+{% elif stage == "code" %}
+<p class="muted">If that address belongs to an admin, a 6-digit code is on
+its way (check within 10 minutes).</p>
+<form method="post" class="card" style="max-width:340px">
+<input type="hidden" name="action" value="verify">
+<input type="hidden" name="email" value="{{ email }}">
+<input name="code" placeholder="6-digit code" inputmode="numeric"
+       autocomplete="one-time-code" autofocus required><br>
+<button>Sign in</button></form>
+<form method="post" style="max-width:340px">
+<input type="hidden" name="action" value="request">
+<input type="hidden" name="email" value="{{ email }}">
+<button style="background:var(--card2);color:var(--dim)">Send a new code</button></form>
+{% else %}
+{% if local_auth %}
+<form method="post" class="card" style="max-width:340px">
+<input type="hidden" name="action" value="password">
+<input name="email" type="email" placeholder="email" value="{{ email }}"
+       autofocus required><br>
+<input name="password" type="password" placeholder="password" required><br>
+<button>Sign in</button></form>
+<form method="post" style="max-width:340px">
+<input type="hidden" name="action" value="request">
+<input name="email" type="email" placeholder="email (for a code instead)" required><br>
+<button style="background:var(--card2);color:var(--dim)">Email me a code</button></form>
+{% else %}
+<form method="post" class="card" style="max-width:340px">
+<input type="hidden" name="action" value="request">
+<input name="email" type="email" placeholder="email" autofocus required><br>
+<button>Email me a code</button></form>
+{% endif %}
+{% endif %}
+{% endblock %}

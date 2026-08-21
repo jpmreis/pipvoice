@@ -1,0 +1,22 @@
+# clangd reads the xtensa-gcc compile commands from build/compile_commands.json;
+# strip the GCC-only flags clang rejects, and silence include-cleaner hints that
+# misfire on ESP-IDF umbrella headers (freertos/FreeRTOS.h etc).
+CompileFlags:
+  Remove:
+    - -mlongcalls
+    - -mdisable-hardware-atomics
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+  # xtensa-gcc predefines __XTENSA__; without it xtensa/config/core.h falls
+  # into a "../hal.h" include branch that doesn't resolve on the host
+  Add:
+    - -D__XTENSA__
+    # newlib headers from the xtensa toolchain (sys/reent.h etc.), searched
+    # before the host SDK — point this at your own ESP-IDF toolchain install
+    # (clangd config has no $HOME expansion, so the path must be absolute)
+    - -isystem/CHANGE/ME/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/xtensa-esp-elf/include
+    # Apple clang enables Blocks, which makes __block a keyword; newlib
+    # headers use __block as a plain identifier
+    - -fno-blocks
+Diagnostics:
+  UnusedIncludes: None

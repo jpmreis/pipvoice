@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pip · Privacy</title>
+<meta name="description" content="Pip's privacy policy in plain words: voice messages are deleted from our server once they arrive, and we keep almost nothing about you.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/png" href="/app/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/app/icons/apple-touch-icon.png">
+<style>
+/* Tokens mirror the landing page (home.html) / PWA (style.css). */
+@font-face { font-family: Montserrat; font-weight: 400; font-display: swap;
+  src: url(/app/fonts/montserrat-400.woff2) format("woff2"); }
+@font-face { font-family: Montserrat; font-weight: 600; font-display: swap;
+  src: url(/app/fonts/montserrat-600.woff2) format("woff2"); }
+@font-face { font-family: Montserrat; font-weight: 700; font-display: swap;
+  src: url(/app/fonts/montserrat-700.woff2) format("woff2"); }
+
+:root {
+  --bg: #000000; --surface: #16161C; --surface2: #24242E;
+  --text: #F2F0EA; --dim: #8B8B96; --accent: #FFB300;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: Montserrat, "Avenir Next", "Trebuchet MS", system-ui, sans-serif; }
+a { color: var(--accent); }
+.wrap { max-width: 680px; margin: 0 auto; padding: 0 24px; }
+
+header { padding: 44px 0 8px; }
+.fmark { display: inline-flex; align-items: baseline; gap: 3px;
+  font-size: 28px; font-weight: 600; color: var(--text);
+  text-decoration: none; }
+.fmark .dot { width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent); transform: translateY(-2px); }
+
+h1 { font-size: clamp(30px, 5vw, 40px); font-weight: 700; line-height: 1.15;
+  margin: 36px 0 0; }
+.updated { font-size: 14px; color: var(--dim); margin: 10px 0 0; }
+.lead { font-size: 18px; line-height: 1.6; color: var(--dim);
+  margin: 22px 0 0; }
+h2 { font-size: 22px; font-weight: 700; margin: 44px 0 0; }
+p { font-size: 17px; line-height: 1.65; margin: 14px 0 0; }
+p.dim { color: var(--dim); }
+ul { margin: 14px 0 0; padding: 0; list-style: none; }
+li { font-size: 17px; line-height: 1.6; display: flex; gap: 12px;
+  margin-top: 10px; }
+li::before { content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); margin-top: 9px; flex-shrink: 0; }
+.card { background: var(--surface); border-radius: 16px; padding: 22px 24px;
+  margin-top: 22px; }
+.card .ct { font-size: 17px; font-weight: 600; }
+.card p { font-size: 16px; color: var(--dim); margin-top: 8px; }
+
+footer { border-top: 1px solid var(--surface2); margin-top: 72px;
+  padding: 36px 0 40px; }
+.frow { display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; }
+.flinks { display: flex; align-items: center; gap: 28px; }
+.flinks a { font-size: 16px; color: var(--dim); text-decoration: none; }
+.fnote { font-size: 13px; color: var(--dim); text-align: center;
+  margin-top: 30px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <a class="fmark" href="/"><span>P</span><span>i</span><span>p</span><span class="dot"></span></a>
+  </header>
+
+  <h1>Privacy, in plain words.</h1>
+  <p class="updated">Last updated 21 August 2026</p>
+  <p class="lead">Pip is a tiny voice-message service for families, run by a
+  family. The honest summary: your voice messages pass through our server on
+  their way to your people, and then we delete them. We keep almost nothing,
+  because we want almost nothing.</p>
+
+  <h2>Voice messages don't stay on our server</h2>
+  <p>A message lives on our server only while it is in transit:</p>
+  <ul>
+    <li>Once it has been delivered and heard, it is deleted from our server
+    within about a day. That short wait is just so it can still reach your
+    other phone if you use Pip on more than one.</li>
+    <li>If it is never picked up - a box unplugged for the summer, say - it
+    is deleted after 30 days, unheard.</li>
+    <li>Delete a message in the app and it is removed from our server right
+    away.</li>
+  </ul>
+  <p>A kid's Pip box keeps its own copy of the messages it has received, on
+  the box itself, in your home - that inbox is yours, not ours. Messages
+  older than 30 days fade off the box too.</p>
+
+  <h2>What we keep about you</h2>
+  <p>The little that makes Pip work:</p>
+  <ul>
+    <li>Your email address (to sign you in with a 6-digit code) and the name
+    and colour your family sees.</li>
+    <li>Who in your family may talk to whom - the guest list a grown-up
+    sets.</li>
+    <li>Reactions (the heart, the HAHA), and whether a box has recently
+    been online.</li>
+    <li>If you turn notifications on: the delivery address your phone's
+    push service gives us. The notification itself only says someone sent
+    you a message - never the audio.</li>
+    <li>One cookie, which keeps you signed in. That is the whole cookie
+    story.</li>
+  </ul>
+  <p>Sign-in codes and device keys are stored hashed, so even we can't read
+  them back.</p>
+
+  <h2>What we never do</h2>
+  <ul>
+    <li>No ads, no analytics, no trackers.</li>
+    <li>No selling or sharing your data, and no training AI on your
+    voices.</li>
+    <li>No listening: nobody at Pip plays your messages.</li>
+    <li>No strangers: only the people on your family's guest list can ever
+    reach you or your kids.</li>
+  </ul>
+
+  <h2>Backups</h2>
+  <p>We keep short-lived backups so a server accident can't eat the family's
+  messages in transit. Backups are kept for up to two weeks, which means a
+  deleted message can linger inside a backup for up to two weeks after it
+  disappears from the server. Then it is really, truly gone.</p>
+
+  <h2>The few services we lean on</h2>
+  <div class="card">
+    <div class="ct">Hetzner</div>
+    <p>Our server lives in a Hetzner data centre in Germany, in the EU.
+    Everything travels to and from it encrypted.</p>
+  </div>
+  <div class="card">
+    <div class="ct">Resend</div>
+    <p>Sends our emails: your sign-in code, and the occasional "you have an
+    unheard message" nudge.</p>
+  </div>
+  <div class="card">
+    <div class="ct">Apple, Google &amp; Mozilla push</div>
+    <p>Your phone's own notification service delivers the "new Pip!" poke.
+    It never carries the audio.</p>
+  </div>
+  <div class="card">
+    <div class="ct">ip-api.com</div>
+    <p>When a Pip box starts up it asks this service for its timezone, so
+    the clock on the box is right. The service sees the box's IP address
+    and nothing else.</p>
+  </div>
+
+  <h2>Kids</h2>
+  <p>Pip is built for kids, so the box is deliberately boring: no camera, no
+  browser, no store, no feed. It only knows the family members a grown-up
+  has chosen, and it only does one thing: Pip.</p>
+
+  <h2>Your data, your call</h2>
+  <p>Want a message gone? Delete it in the app. Want everything gone? Email
+  us at <a href="mailto:pip@__HOST__">pip@__HOST__</a> and we will
+  delete your account and everything attached to it. Questions about any of
+  this land in the same inbox.</p>
+
+  <p class="dim" style="margin-top:40px">If we ever change how any of this
+  works, we will update this page and the date at the top.</p>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="frow">
+      <a class="fmark" href="/"><span>P</span><span>i</span><span>p</span><span class="dot"></span></a>
+      <div class="flinks">
+        <a href="/install">Get the app</a>
+        <a href="/app/">Sign in</a>
+      </div>
+    </div>
+    <div class="fnote">Made with love, for the loudest little voices.
+    &copy; 2026 __HOST__</div>
+  </div>
+</footer>
+
+</body>
+</html>

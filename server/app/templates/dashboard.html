@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block content %}
+<h1>Dashboard</h1>
+<div class="grid">
+<div class="card"><div class="stat">{{ stats.users }}</div>Users</div>
+<div class="card"><div class="stat">{{ stats.devices }}</div>Devices</div>
+<div class="card"><div class="stat">{{ stats.messages }}</div>Messages</div>
+<div class="card"><div class="stat">{{ stats.pending }}</div>Undelivered</div>
+</div>
+<div class="card"><h2>Devices</h2><table>
+<tr><th>Device</th><th>Owner</th><th>Last seen</th></tr>
+{% for d in devices %}<tr><td>{{ d.id }}</td><td>{{ d.display_name }}</td>
+<td class="muted">{{ d.last_seen or "never" }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

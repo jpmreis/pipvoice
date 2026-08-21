@@ -1,0 +1,99 @@
+"""Pip server. Run: uvicorn app.main:app --host 127.0.0.1 --port 8080"""
+import logging
+import os
+
+import functools
+
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
+import asyncio
+
+from . import api, db, mqtt, presence, themes
+from .api import router as api_router
+from .admin import router as admin_router
+from .cleanup import cleanup_loop
+
+logging.basicConfig(level=logging.INFO)
+db.init()
+themes.render_all()   # no-op when cached variants are current
+
+app = FastAPI(title="Pip", docs_url=None, redoc_url=None)
+app.include_router(api_router)
+app.include_router(admin_router)
+
+
+@app.middleware("http")
+async def _stamp_version(request, call_next):
+    # every /v1 response carries the global version, so the PWA notices an
+    # update on its next API interaction instead of waiting out the poll -
+    # the browser-side stand-in for the devices' MQTT firmware notify
+    resp = await call_next(request)
+    if request.url.path.startswith("/v1/"):
+        resp.headers["X-Pip-Version"] = api.global_version()
+    return resp
+
+# the phone-user PWA: /app/ (html=True serves index.html at the root)
+app.mount("/app", StaticFiles(
+    directory=os.path.join(os.path.dirname(__file__), "web"), html=True),
+    name="app")
+
+
+@app.on_event("startup")
+async def _start_cleanup():
+    asyncio.create_task(cleanup_loop())
+    presence.start_subscriber()
+    # refresh the broker ACL so already-provisioned devices gain their
+    # presence/<id> write line without re-provisioning; best-effort like
+    # everything mosquitto (dev machines have no ACL dir)
+    try:
+        mqtt._rebuild_acl()
+        mqtt._reload_broker()
+    except Exception:
+        pass
+
+
+@functools.lru_cache(maxsize=None)
+def _public_page(name: str) -> str:
+    """web/ pages carry no hardcoded domain; __BASE__/__HOST__ tokens are
+    filled from PIP_BASE_URL so the same tree serves any deployment."""
+    base = db.env("BASE_URL", "").rstrip("/")
+    host = base.split("//")[-1] or "this server"
+    path = os.path.join(os.path.dirname(__file__), "web", name)
+    with open(path, encoding="utf-8") as f:
+        return f.read().replace("__BASE__", base).replace("__HOST__", host)
+
+
+@app.get("/")
+def root():
+    """Public landing page. Lives in web/ so the deploy copy step picks it
+    up, but is served at / — outside the PWA's /app/ manifest scope."""
+    return HTMLResponse(_public_page("home.html"))
+
+
+@app.get("/install")
+def install():
+    """Pretty public URL for the emailed install instructions. The page
+    itself lives inside /app/ so it shares the PWA's manifest scope -
+    Chrome only offers its native install prompt to in-scope pages."""
+    return RedirectResponse("/app/install.html")
+
+
+@app.get("/privacy")
+def privacy():
+    """Public plain-language privacy policy (linked from the landing
+    footer); lives in web/ like the landing page, served outside /app/."""
+    return HTMLResponse(_public_page("privacy.html"))
+
+
+@app.get("/waitlist")
+def waitlist():
+    """Public waitlist signup page (form posts to /v1/waitlist)."""
+    return FileResponse(
+        os.path.join(os.path.dirname(__file__), "web", "waitlist.html"))
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}

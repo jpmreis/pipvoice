@@ -1,0 +1,65 @@
+# Self-hosted Pip: app + Mosquitto (device push) + Caddy (TLS).
+# Copy .env.example to .env, set DOMAIN and MQTT_SERVER_PASS, then:
+#   docker compose up -d
+# Full walkthrough: docs/SELF-HOSTING.md
+name: pipvoice
+services:
+  app:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      PIP_BASE_URL: https://${DOMAIN:?set DOMAIN in .env}
+      PIP_DATA: /data
+      # local passwords on by default for self-hosts (skip SMTP); see
+      # server/env.example for every setting
+      PIP_LOCAL_AUTH: ${PIP_LOCAL_AUTH:-1}
+      PIP_MQTT_HOST: mosquitto
+      PIP_MQTT_PORT: "1883"
+      PIP_MQTT_USER: server
+      PIP_MQTT_PASS: ${MQTT_SERVER_PASS:?set MQTT_SERVER_PASS in .env}
+      PIP_MQTT_PASSWD: /mosquitto-auth/passwd
+      PIP_MQTT_ACL: /mosquitto-auth/acl
+      PIP_SMTP_HOST: ${PIP_SMTP_HOST:-}
+      PIP_SMTP_PORT: ${PIP_SMTP_PORT:-587}
+      PIP_SMTP_USER: ${PIP_SMTP_USER:-}
+      PIP_SMTP_PASS: ${PIP_SMTP_PASS:-}
+      PIP_SMTP_FROM: ${PIP_SMTP_FROM:-}
+    volumes:
+      - pip-data:/data
+      - mosquitto-auth:/mosquitto-auth
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/pip/entrypoint.sh"]
+    environment:
+      DOMAIN: ${DOMAIN}
+      MQTT_SERVER_PASS: ${MQTT_SERVER_PASS}
+    ports:
+      - "8883:8883"          # devices connect with MQTT over TLS
+    volumes:
+      - ./server/docker/mosquitto.conf:/pip/mosquitto.conf:ro
+      - ./server/docker/mosquitto-entrypoint.sh:/pip/entrypoint.sh:ro
+      - mosquitto-auth:/mosquitto-auth
+      - mosquitto-data:/mosquitto/data
+      - caddy-data:/caddy-data:ro   # to borrow Caddy's Let's Encrypt cert
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./server/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  pip-data:
+  mosquitto-auth:
+  mosquitto-data:
+  caddy-data:
+  caddy-config:

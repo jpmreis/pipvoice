@@ -1,0 +1,186 @@
+/* Pip UI - core: init, navigation, app-facing entry points */
+#include "ui_internal.h"
+#include <stdio.h>
+#include <string.h>
+
+ui_state_t g_ui;
+
+static lv_obj_t *s_screens[SCR_COUNT];
+
+void nav_to(ui_screen_id_t id, lv_screen_load_anim_t anim)
+{
+    /* refresh dynamic screens right before showing them */
+    switch (id) {
+        case SCR_HOME:   scr_home_refresh();  break;
+        case SCR_INBOX:
+            scr_inbox_refresh();
+            if (g_ui.cb.inbox_opened) g_ui.cb.inbox_opened();
+            break;
+        case SCR_PINPAD:       scr_pinpad_reset();         break;
+        case SCR_THEME_PICKER: scr_theme_picker_refresh(); break;
+        default: break;
+    }
+    lv_screen_load_anim(s_screens[id], anim, 180, 0, false);
+}
+
+void ui_init(const ui_callbacks_t *cbs)
+{
+    memset(&g_ui, 0, sizeof(g_ui));
+    if (cbs) g_ui.cb = *cbs;
+    g_ui.battery_pct = 100;
+
+    s_screens[SCR_HOME]       = scr_home_create();
+    s_screens[SCR_RECORD]     = scr_record_create();
+    s_screens[SCR_INBOX]      = scr_inbox_create();
+    s_screens[SCR_PLAYBACK]   = scr_playback_create();
+    s_screens[SCR_PINPAD]     = scr_pinpad_create();
+    s_screens[SCR_SETTINGS]   = scr_settings_create();
+    s_screens[SCR_THEME_PICKER] = scr_theme_picker_create();
+    s_screens[SCR_WIFI_SETUP] = scr_wifi_setup_create();
+    s_screens[SCR_SPLASH]     = scr_splash_create();
+
+    scr_home_refresh();
+    lv_screen_load(s_screens[SCR_HOME]);
+}
+
+/* ---------------- physical-button navigation ---------------- */
+static bool nav_locked_out(void)
+{
+    /* don't yank an active recording or the provisioning portal */
+    lv_obj_t *act = lv_screen_active();
+    return act == s_screens[SCR_RECORD] || act == s_screens[SCR_WIFI_SETUP];
+}
+
+void ui_open_record_recent(void)
+{
+    if (nav_locked_out() || g_ui.contact_count == 0) return;
+    lv_display_trigger_activity(NULL);
+    strncpy(g_ui.selected_contact_id, g_ui.contacts[0].id, UI_ID_LEN - 1);
+    strncpy(g_ui.selected_contact_name, g_ui.contacts[0].name, UI_NAME_LEN - 1);
+    ui_react_mark_seen(g_ui.selected_contact_id);
+    scr_record_show();
+    nav_to(SCR_RECORD, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
+void ui_open_inbox(void)
+{
+    if (nav_locked_out()) return;
+    lv_display_trigger_activity(NULL);
+    if (lv_screen_active() != s_screens[SCR_INBOX])
+        nav_to(SCR_INBOX, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
+void ui_splash_play(void)
+{
+    if (nav_locked_out()) return;
+    scr_splash_show();                     /* set greeting + arm animations */
+    nav_to(SCR_SPLASH, LV_SCR_LOAD_ANIM_FADE_ON);
+}
+
+void ui_splash_wake(void)
+{
+    /* wake-from-display-off: the panel is still dark, so the splash must be
+     * on the panel BEFORE brightness returns. nav_to() won't do: its 180 ms
+     * load duration defers the actual screen switch to the next anim tick
+     * even for ANIM_NONE. lv_screen_load() is time-0 -> switches now. */
+    if (nav_locked_out()) return;
+    scr_splash_show();
+    lv_screen_load(s_screens[SCR_SPLASH]);
+    lv_refr_now(NULL);
+}
+
+/* ---------------- data setters ---------------- */
+void ui_set_owner_name(const char *name)
+{
+    strncpy(g_ui.owner_name, name, UI_NAME_LEN - 1);
+    scr_home_refresh();
+}
+
+void ui_set_contacts(const ui_contact_t *list, uint8_t count)
+{
+    if (count > UI_MAX_CONTACTS) count = UI_MAX_CONTACTS;
+    memcpy(g_ui.contacts, list, count * sizeof(ui_contact_t));
+    g_ui.contact_count = count;
+    scr_home_refresh();
+}
+
+void ui_set_inbox(const ui_message_t *list, uint8_t count)
+{
+    if (count > UI_MAX_MESSAGES) count = UI_MAX_MESSAGES;
+    memcpy(g_ui.inbox, list, count * sizeof(ui_message_t));
+    g_ui.inbox_count = count;
+    g_ui.unheard_count = 0;
+    for (uint8_t i = 0; i < count; i++)
+        if (!g_ui.inbox[i].heard) g_ui.unheard_count++;
+    scr_home_update_inbox();      /* pill only: don't reset a grid scroll */
+    scr_inbox_refresh();
+}
+
+void ui_set_battery(uint8_t pct, bool charging, bool present)
+{
+    g_ui.battery_pct = pct;
+    g_ui.charging = charging;
+    g_ui.battery_present = present;
+    scr_home_update_status();     /* periodic: must not rebuild the grid */
+}
+
+void ui_set_wifi(ui_wifi_state_t state)
+{
+    g_ui.wifi = state;
+    scr_home_update_status();
+}
+
+void ui_set_themes(const ui_theme_info_t *list, uint8_t count)
+{
+    if (count > UI_MAX_THEMES) count = UI_MAX_THEMES;
+    memcpy(g_ui.themes, list, count * sizeof(ui_theme_info_t));
+    g_ui.theme_count = count;
+    scr_theme_picker_refresh();
+}
+
+void ui_set_reaction_badges(const ui_reaction_t *list, uint8_t count)
+{
+    if (count > UI_MAX_CONTACTS) count = UI_MAX_CONTACTS;
+    memcpy(g_ui.reaction_badges, list, count * sizeof(ui_reaction_t));
+    g_ui.reaction_badge_count = count;
+    scr_home_refresh();
+}
+
+void ui_set_peer_recording(const char *from_id, const char *from_name,
+                           bool active)
+{
+    if (active) {
+        strncpy(g_ui.peer_rec_from, from_id, UI_ID_LEN - 1);
+        strncpy(g_ui.peer_rec_name, from_name, UI_NAME_LEN - 1);
+        g_ui.peer_rec = true;
+    } else {
+        /* a stop only clears the indicator it started */
+        if (strcmp(g_ui.peer_rec_from, from_id)) return;
+        g_ui.peer_rec = false;
+    }
+    scr_record_peer_update();
+}
+
+/* ---------------- async events ---------------- */
+void ui_notify_new_message(const char *sender_name)
+{
+    char buf[64];
+    snprintf(buf, sizeof(buf), LV_SYMBOL_BELL "  New message from %s", sender_name);
+    ui_toast(buf, COL_ACCENT);
+    /* badge counts are refreshed when the app calls ui_set_inbox() */
+}
+
+void ui_flash_error(const char *text) { ui_toast(text, COL_DANGER); }
+void ui_notice(const char *text)      { ui_toast(text, COL_ACCENT); }
+
+void ui_wifi_setup_finished(void)
+{
+    ui_toast(LV_SYMBOL_OK "  Connected!", COL_OK);
+    if (lv_screen_active() == s_screens[SCR_WIFI_SETUP])
+        nav_to(SCR_HOME, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
+}
+
+void ui_record_tick(uint16_t elapsed_s, uint16_t max_s) { scr_record_tick(elapsed_s, max_s); }
+void ui_record_limit_reached(void)                      { scr_record_limit(); }
+void ui_playback_progress(uint16_t p, uint16_t t)       { scr_playback_progress(p, t); }
+void ui_playback_finished(void)                         { scr_playback_finished(); }

@@ -1,0 +1,29 @@
+[Unit]
+Description=Pip server
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+User=pipvoice
+Group=pipvoice
+EnvironmentFile=/opt/pipvoice/env
+WorkingDirectory=/opt/pipvoice
+ExecStart=/opt/pipvoice/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080
+Restart=always
+RestartSec=3
+
+# sandboxing - no NoNewPrivileges: provisioning uses the scoped
+# "sudo systemctl reload mosquitto" from /etc/sudoers.d/pipvoice
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/pipvoice/data /etc/mosquitto/pipvoice
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

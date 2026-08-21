@@ -1,0 +1,45 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pip admin</title>
+<link rel="icon" type="image/png" href="/app/icons/icon-192.png"><style>
+@font-face{font-family:Montserrat;font-weight:400;font-display:swap;
+src:url(/app/fonts/montserrat-400.woff2) format("woff2")}
+@font-face{font-family:Montserrat;font-weight:600;font-display:swap;
+src:url(/app/fonts/montserrat-600.woff2) format("woff2")}
+@font-face{font-family:Montserrat;font-weight:700;font-display:swap;
+src:url(/app/fonts/montserrat-700.woff2) format("woff2")}
+:root{--bg:#000;--card:#16161c;--card2:#24242e;--tx:#f2f0ea;--dim:#8b8b96;
+--acc:#ffb300;--ok:#3ddc84;--bad:#ff5252}
+body{font-family:Montserrat,system-ui,sans-serif;background:var(--bg);
+color:var(--tx);margin:0}
+nav{display:flex;gap:4px;padding:12px 16px;background:var(--card);flex-wrap:wrap;
+align-items:center}
+nav .brand{font-weight:700;font-size:18px;color:var(--tx);padding:8px 10px 8px 0}
+nav .brand b{color:var(--acc)}
+nav a{color:var(--dim);text-decoration:none;padding:8px 14px;border-radius:10px}
+nav a.on,nav a:hover{color:var(--tx);background:var(--card2)}
+main{max-width:860px;margin:0 auto;padding:20px 16px}
+h1{font-size:22px;color:var(--acc)}h2{font-size:17px}
+.card{background:var(--card);border-radius:14px;padding:16px;margin:14px 0}
+table{width:100%;border-collapse:collapse}
+td,th{padding:8px 10px;text-align:left;border-bottom:1px solid var(--card2)}
+input,select,textarea,button{background:var(--card2);color:var(--tx);
+border:1px solid #333;border-radius:10px;padding:10px;font-size:15px;margin:4px 0}
+button{background:var(--acc);color:#000;font-weight:700;border:0;cursor:pointer}
+.dot{display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:6px}
+code,textarea.mono{font-family:ui-monospace,monospace;font-size:13px}
+.muted{color:var(--dim)}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{font-size:28px;font-weight:800}
+.swatches{display:grid;grid-template-columns:repeat(8,36px);gap:8px;margin:8px 0}
+.swatch input{display:none}
+.swatch span{display:block;width:32px;height:32px;border-radius:50%;
+border:3px solid transparent;cursor:pointer}
+.swatch input:checked+span{border-color:var(--tx)}
+</style></head><body>
+{% if me is defined and me %}<nav>
+<span class="brand">Pip<b>.</b></span>
+<a href="/admin">Dashboard</a><a href="/admin/users">Users</a>
+<a href="/admin/devices">Devices</a><a href="/admin/perms">Permissions</a>
+<a href="/admin/firmware">Firmware</a></nav>{% endif %}
+<main>{% block content %}{% endblock %}</main></body></html>

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<p style="margin:0 0 16px;">Hello {{ first }}! &#128075;</p>
+<p style="margin:0 0 16px;">Your family put a little voice-message app on
+the internet. It's called <b>Pip</b>, it lives on your phone's home
+screen, and it exists so people can send you their actual voices instead
+of typing "ok".</p>
+<p style="margin:0 0 24px;">Your spot in the family is already set up
+and waiting for you:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td align="center" style="padding:0 0 28px;">
+  <a href="{{ base }}/install" style="display:inline-block;
+     background-color:#FFB300;color:#1B1B1F;font-weight:700;
+     font-size:17px;text-decoration:none;padding:16px 36px;
+     border-radius:14px;">Set up Pip &rarr;</a>
+</td></tr>
+</table>
+<p style="margin:0 0 4px;font-weight:700;">Then sign in</p>
+<p style="margin:0;color:#5A5A64;">When Pip asks who you are, type this
+email address (<b>{{ email }}</b>) and we'll send you a 6-digit code.
+That's the whole thing. No password. Passwords are for banks.</p>
+{% endblock %}
+{% block footer %}You're getting this because someone in your family
+pressed a shiny yellow button with your name on it.{% endblock %}

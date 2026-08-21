@@ -1,0 +1,18 @@
+# firmware
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/.cache/
+# server
+server/venv/
+server/data/
+__pycache__/
+*.pyc
+.DS_Store
+# local
+.claude/settings.local.json
+CLAUDE.local.md
+pip.bundle
+/.env
+docker-compose.override.yml

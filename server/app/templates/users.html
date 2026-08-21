@@ -1,0 +1,50 @@
+{% extends "base.html" %}{% block content %}
+<h1>Users</h1>
+{% if sent == "1" %}<p class="ok">Install email sent.</p>
+{% elif sent == "0" %}<p class="bad">Install email NOT sent &mdash; the user
+needs an email address and the server needs SMTP configured.</p>{% endif %}
+<div class="card"><table>
+<tr><th></th><th>Username</th><th>Name</th><th>Kind</th><th>Email</th><th>Admin</th><th></th></tr>
+{% for u in users %}<tr>
+<td><span class="dot" style="background:#{{ u.color }}"></span></td>
+<td>{{ u.username }}</td><td>{{ u.display_name }}</td>
+<td>{% if u.username in device_users %}device{% else %}phone{% endif %}</td>
+<td><form method="post" action="/admin/users/{{ u.id }}/email"
+     style="display:flex;gap:6px;align-items:center">
+<input name="email" type="email" value="{{ u.email or '' }}"
+       placeholder="no email" style="width:210px">
+<button>Save</button></form>
+{% if local_auth and u.username not in device_users %}
+<form method="post" action="/admin/users/{{ u.id }}/password"
+     style="display:flex;gap:6px;align-items:center;margin-top:4px">
+<input name="password" type="password" minlength="8"
+       placeholder="{{ 'password set - replace?' if u.password_hash else 'set password' }}"
+       style="width:210px">
+<button>Set</button></form>
+{% endif %}</td>
+<td>{{ "yes" if u.is_admin else "" }}</td>
+<td>{% if u.email and u.username not in device_users %}
+<form method="post" action="/admin/users/{{ u.id }}/send-install">
+<button>Send install email</button></form>
+{% endif %}</td></tr>{% endfor %}
+</table></div>
+<p class="muted">A user with a provisioned device is a device user; everyone
+else is a phone user (PWA at <code>/app</code>). Phone users sign in with a
+code sent to their email{% if local_auth %} or with their local password
+(set one above to skip email codes entirely){% else %} &mdash; no email, no
+sign-in{% endif %}. "Send install email" mails them the setup
+instructions.</p>
+<div class="card"><h2>Add user</h2>
+<form method="post">
+<input name="username" placeholder="username (internal id)" required>
+<input name="display_name" placeholder="Display name" required><br>
+<div class="swatches">
+{% for col in palette %}<label class="swatch"><input type="radio" name="color"
+value="{{ col }}" {{ "checked" if col == random_color }}><span
+style="background:#{{ col }}"></span></label>{% endfor %}
+</div>
+<span class="muted">avatar color (random suggestion pre-picked)</span><br>
+<input name="email" type="email" placeholder="email (phone users sign in with this)"><br>
+<label><input type="checkbox" name="is_admin" value="1"> admin</label><br>
+<button>Create</button></form></div>
+{% endblock %}

@@ -1,0 +1,71 @@
+# Tagged release: build the firmware from the clean tag, package the
+# flash bundle + manifest, publish a GitHub Release. Servers ingest the
+# release from the admin Firmware page (server/app/release.py) and then
+# serve the binaries same-origin to their own web flasher and OTA — the
+# manifest is never fetched by browsers, so GitHub's missing CORS
+# headers on release assets don't matter.
+#
+# Tag v<version> must match PROJECT_VER in firmware/CMakeLists.txt
+# (one version number for firmware + server + PWA).
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}   # dry run: builds + packages, publishes nothing
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # one supported board today; a second board becomes a matrix here
+    # plus a builds[] entry in firmware/tools/make_manifest.py
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve version (tag must match PROJECT_VER)
+        id: ver
+        run: |
+          PV=$(sed -n 's/.*set(PROJECT_VER "\(.*\)").*/\1/p' firmware/CMakeLists.txt)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VER="${GITHUB_REF_NAME#v}"
+            if [ "$VER" != "$PV" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match PROJECT_VER $PV"
+              exit 1
+            fi
+          else
+            VER="$PV"
+          fi
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Build firmware (ESP-IDF v5.4.4)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.4
+          target: esp32s3
+          path: firmware
+
+      - name: Package assets + manifest + notes
+        run: |
+          python3 firmware/tools/make_manifest.py \
+            --version "${{ steps.ver.outputs.ver }}" --build firmware/build \
+            --changelog CHANGELOG.md --out dist
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: dist/RELEASE_NOTES.md
+          files: |
+            dist/pip-*.bin
+            dist/manifest.json
+
+      - name: Upload dry-run artifact
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-${{ steps.ver.outputs.ver }}-dryrun
+          path: dist/

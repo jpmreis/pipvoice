@@ -1,0 +1,59 @@
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+# performance settings matching the official Waveshare examples
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+# LV_ATTRIBUTE_FAST_MEM_USE_IRAM (set in Waveshare demos) overflows DRAM
+# here: LVGL-in-IRAM does not fit next to the WiFi/TLS/MQTT/opus stack.
+CONFIG_LV_BUILD_EXAMPLES=n
+CONFIG_LV_BUILD_DEMOS=n
+# LVGL allocates from PSRAM (main/lv_mem_psram.c) - the ~100 KB widget
+# tree in internal RAM starved the WiFi driver and the audio task stack
+CONFIG_LV_USE_CUSTOM_MALLOC=y
+# permit http:// OTA URLs for local/bench testing; production manifests
+# point at https:// where the cert bundle is enforced as usual
+# CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP is not set
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+# WiFi/LWIP buffers in PSRAM - internal RAM can't hold them next to
+# LVGL + the 32 KB audio task stack (audio + ota task creation failed)
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# malloc() prefers PSRAM above 512 bytes: the default 16 KB threshold kept
+# the entire LVGL widget tree in internal RAM, starving WiFi's DMA-required
+# static RX buffers (task stacks and driver DMA allocs stay internal - the
+# FreeRTOS port and heap_caps callers force MALLOC_CAP_INTERNAL themselves)
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+# WiFi speed-over-RAM IRAM optimizations cost ~50 KB of DIRAM that this
+# board needs for the audio stack + WiFi's own DMA buffers; voice-message
+# sync doesn't need the extra wifi throughput
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+# 6 static RX buffers (DMA, internal-only) instead of 10 - same reason
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+# Kconfig requires BA_WIN <= 2x static RX buffers; the unpinned default
+# (16) breaks clean regenerations (CI, fresh checkouts)
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_FREERTOS_HZ=1000
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_40=y
+CONFIG_LV_USE_QRCODE=y
+# hotel-WiFi sign-in relay: the phone joins Pip's soft-AP and completes the
+# captive portal through NAPT, authorizing Pip's own MAC on the hotel network
+CONFIG_LWIP_IP_FORWARD=y
+CONFIG_LWIP_IPV4_NAPT=y
+# mbedtls allocates from PSRAM: with INTERNAL_MEM_ALLOC (old default) every
+# TLS connection held its ~20-40 KB of buffers+bignum scratch in internal
+# RAM - MQTT's resident session left sync's HTTPS handshakes failing with
+# alloc errors inside RSA verify (PK verify 0x4290)
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

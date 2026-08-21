@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Join the Pip waitlist</title>
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/png" href="/app/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/app/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+
+<section class="on">
+  <div class="wordmark" style="margin:64px 0 24px"><span>P</span><span>i</span><span>p</span><span class="dot"></span></div>
+
+  <div id="wl-form">
+    <p class="dim" style="text-align:center;margin:0 0 24px">Pip is
+    family-sized, so it grows slowly. Leave your email and we will ping
+    you when there is room for yours.</p>
+    <div class="card">
+      <input id="wl-email" type="email" placeholder="your email address"
+             autocapitalize="none" autocorrect="off" autocomplete="email"
+             maxlength="254">
+      <button class="btn accent" id="wl-join">Put me on the list</button>
+      <div id="wl-err" class="small" style="color:var(--danger);text-align:center;min-height:20px"></div>
+    </div>
+  </div>
+
+  <div id="wl-done" style="display:none">
+    <p style="text-align:center;margin:0 0 8px">You are on the list.</p>
+    <p class="dim small" style="text-align:center;margin:0 0 24px">We will
+    be in touch the moment there is room. No newsletters, pinky promise.</p>
+  </div>
+
+  <a href="/app/" class="btn ghost small" style="display:flex;align-items:center;
+     justify-content:center;text-decoration:none;color:var(--dim)">Already
+     have Pip? Sign in</a>
+</section>
+
+<script>
+const btn = document.getElementById("wl-join");
+const err = document.getElementById("wl-err");
+async function join() {
+  err.textContent = "";
+  const email = document.getElementById("wl-email").value.trim().toLowerCase();
+  if (!email.includes("@")) {
+    err.textContent = "Type your email address";
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const body = new FormData();
+    body.append("email", email);
+    const r = await fetch("/v1/waitlist", { method: "POST", body });
+    if (r.status === 429) {
+      err.textContent = "Too many tries - come back in a bit";
+    } else if (!r.ok) {
+      err.textContent = "That does not look like an email address";
+    } else {
+      document.getElementById("wl-form").style.display = "none";
+      document.getElementById("wl-done").style.display = "block";
+    }
+  } catch (e) {
+    err.textContent = "Network hiccup - try again";
+  }
+  btn.disabled = false;
+}
+btn.onclick = join;
+document.getElementById("wl-email").addEventListener("keydown", e => {
+  if (e.key === "Enter") join();
+});
+</script>
+</body>
+</html>

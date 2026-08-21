@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Pip</title>
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pip">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="bg"></div>
+
+<div id="splash">
+  <div class="wordmark"><span>P</span><span>i</span><span>p</span><span class="dot"></span></div>
+  <div class="hello" id="splash-hello">Hello</div>
+</div>
+
+<section id="scr-login">
+  <div class="wordmark" style="margin:64px 0 40px"><span>P</span><span>i</span><span>p</span><span class="dot"></span></div>
+  <div class="card">
+    <div id="login-step-email">
+      <input id="login-email" type="email" placeholder="your email address"
+             autocapitalize="none" autocorrect="off" autocomplete="email">
+      <input id="login-pass" type="password" placeholder="password"
+             autocomplete="current-password" style="display:none">
+      <button class="btn accent" id="login-pw-signin"
+              style="display:none">Sign in</button>
+      <button class="btn accent" id="login-send">Email me a code</button>
+    </div>
+    <div id="login-step-code" style="display:none">
+      <p class="dim small" id="login-sent-note" style="text-align:center;margin-top:0"></p>
+      <input id="login-code" placeholder="6-digit code" inputmode="numeric"
+             autocomplete="one-time-code" maxlength="6"
+             style="text-align:center;letter-spacing:6px">
+      <button class="btn accent" id="login-verify">Sign in</button>
+      <button class="btn ghost small" id="login-resend">Send a new code</button>
+    </div>
+    <div id="login-err" class="small" style="color:var(--danger);text-align:center"></div>
+  </div>
+  <a href="/waitlist" class="btn ghost small" style="display:flex;align-items:center;
+     justify-content:center;text-decoration:none;color:var(--dim)">New to Pip?
+     Join the waitlist</a>
+</section>
+
+<section id="scr-notify">
+  <header><span class="spacer"></span><span class="title">Notifications</span><span class="spacer"></span></header>
+  <p class="dim">Turn on notifications so you hear about new voice messages
+  the moment they arrive.</p>
+  <button class="btn accent" id="notify-btn">Turn on notifications</button>
+  <p class="dim small" id="notify-denied" style="display:none">Notifications are
+  blocked for Pip. Enable them in iOS Settings &rarr; Notifications &rarr; Pip,
+  then come back.</p>
+  <button class="btn ghost small" id="notify-skip">Not now</button>
+</section>
+
+<section id="scr-home">
+  <header>
+    <span class="spacer"></span>
+    <span class="title">Pip<span style="color:var(--accent)">.</span></span>
+    <button class="gear" id="btn-settings" aria-label="Settings">&#9881;</button>
+  </header>
+  <p id="hello" class="dim" style="margin-top:0"></p>
+  <h1 class="small dim" style="font-weight:600">SEND A MESSAGE</h1>
+  <div class="contacts" id="contacts"></div>
+  <h1 class="small dim" style="font-weight:600;margin-top:28px">INBOX<span id="inbox-badge" class="badge" style="display:none"></span></h1>
+  <div id="inbox"></div>
+  <p id="inbox-empty" class="dim">No messages yet.</p>
+</section>
+
+<section id="scr-record">
+  <header>
+    <button class="back" id="rec-back">&#8249;</button>
+    <span class="title" id="rec-title">Record</span>
+    <span class="spacer"></span>
+  </header>
+  <div id="recwrap">
+    <div id="rectimer">0:00</div>
+    <button id="recbtn">REC</button>
+    <div id="rechint">Tap to record</div>
+    <div id="peer-rec" style="display:none"><span class="pdot"></span><span id="peer-rec-name"></span></div>
+    <div id="preview" style="display:none">
+      <button class="btn" id="prev-play">&#9654;&#xFE0E; Play</button>
+      <button class="btn ok" id="prev-send">Send</button>
+      <button class="btn ghost" id="prev-again">Re-record</button>
+    </div>
+  </div>
+</section>
+
+<section id="scr-settings">
+  <header>
+    <button class="back" id="set-back">&#8249;</button>
+    <span class="title">Settings</span>
+    <span class="spacer"></span>
+  </header>
+  <div class="card">
+    <div id="set-me"></div>
+    <div class="small dim" id="set-notify-state" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
+    <div class="small dim" style="font-weight:600;margin-bottom:10px">BACKGROUND</div>
+    <div class="themes" id="themes"></div>
+  </div>
+  <button class="btn" id="set-manage" style="display:none">Manage device</button>
+  <button class="btn" id="set-setup">Set up a new Pip</button>
+  <button class="btn" id="set-test">Send test notification</button>
+  <button class="btn danger" id="set-logout">Sign out</button>
+  <p class="small dim" style="text-align:center" id="set-version">Pip</p>
+</section>
+
+<section id="scr-manage">
+  <header>
+    <button class="back" id="mng-back">&#8249;</button>
+    <span class="title">Manage device</span>
+    <span class="spacer"></span>
+  </header>
+  <div id="manage-list"></div>
+  <p class="small dim" style="text-align:center">Changes reach the Pip box
+  within seconds while it's on; otherwise the next time it starts.</p>
+</section>
+
+<div id="rsheet" style="display:none"><div id="rsheet-panel"></div></div>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
