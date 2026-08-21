@@ -12,6 +12,8 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [0.1.30] — 2026-08-21
+
 ### Added
 - Self-hosting support: Docker Compose stack (app + Mosquitto + Caddy)
   with automatic Let's Encrypt, `docs/SELF-HOSTING.md` guide, and a
@@ -30,10 +32,25 @@ write entries for humans.
   from GitHub (hash-verified) instead of a manual upload.
 - `PIP_MQTT_PUBLIC_HOST` / `PIP_MQTT_PUBLIC_PORT` for split deployments;
   `server/env.example` documenting every setting.
+- Waitlist signups email every admin who has an email address on file.
+- The device-setup page has a back button, so it is no longer a dead
+  end until a flash finishes.
 
 ### Changed
 - Landing and privacy pages render the deployment's own domain from
   `PIP_BASE_URL` (no hardcoded hostnames in the repo).
+- One hosted-vs-self-hosted check — `db.hosted()` on the server,
+  `config_is_hosted()` in firmware — derived from whether the
+  deployment's base URL is pipvoice.com. Self-hosted servers get no
+  public waitlist (page, endpoint, or login link) and their landing
+  and privacy pages speak honestly about who runs the server, instead
+  of carrying the hosted instance's claims (data centre, email
+  provider, backups, free service, passwordless sign-in).
+- Processed public pages (landing, privacy, waitlist) moved out of the
+  PWA static mount; their raw templates are no longer reachable under
+  `/app/`.
+- Install page and install email only promise passwordless sign-in
+  where it is true.
 - Open-sourced under AGPL-3.0 (closed contributions).
 
 ## [0.1.29] — 2026-08-19
