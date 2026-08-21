@@ -56,7 +56,7 @@ def _dest_path(version: str, kind: str) -> str:
 def install() -> str:
     """Fetch the manifest and install its version. Returns a human
     message; raises on network/validation failure."""
-    raw, manifest_url = _get(MANIFEST_URL, MAX_MANIFEST)
+    raw, _ = _get(MANIFEST_URL, MAX_MANIFEST)
     m = json.loads(raw)
     version = str(m.get("version", ""))
     if not re.fullmatch(_VERSION_RE, version):
@@ -84,7 +84,13 @@ def install() -> str:
         kind = p.get("kind")
         if kind not in ("app", "bootloader", "parttable"):
             continue                     # e.g. future otadata entries
-        data, _ = _get(urljoin(manifest_url, p["path"]), MAX_PART)
+        # resolve against the *requested* URL, not the redirect target:
+        # GitHub hands out release assets via a signed CDN, so a sibling
+        # path next to the final URL lacks that asset's token (HTTP 618
+        # jwt-not-provided). Re-walking the redirect per part gets each
+        # asset its own token; a "latest" release that moves mid-install
+        # is caught by the sha256 checks below.
+        data, _ = _get(urljoin(MANIFEST_URL, p["path"]), MAX_PART)
         got = hashlib.sha256(data).hexdigest()
         if got != p.get("sha256"):
             raise ValueError(f"{p['path']}: sha256 mismatch "
