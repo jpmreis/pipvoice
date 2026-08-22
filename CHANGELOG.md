@@ -12,6 +12,23 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [0.1.33] — 2026-08-22
+
+### Fixed
+- Quiet hours could deliver (and chime) the moment a box was powered on
+  at night. A box that has just booted has no clock until SNTP answers,
+  and "I don't know what time it is" was being read as daytime, so the
+  first sync ran before the hold could apply. Incoming mail now waits
+  for the clock - bounded, so a network that blocks NTP still gets its
+  messages a couple of minutes after boot.
+- Boot no longer flashes the home screen before the greeting: the
+  splash is put on the panel synchronously and the backlight comes up
+  on the animation itself.
+- The battery poll and button task now start after the greeting rather
+  than during it. Both talk to the power chip over I2C, and its first
+  read fires immediately - with a charger attached there is more to
+  read, which is why the stutter showed up when plugging in.
+
 ## [0.1.32] — 2026-08-22
 
 Fixes from testing 0.1.31 on a box.

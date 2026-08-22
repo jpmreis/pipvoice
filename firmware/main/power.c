@@ -34,7 +34,7 @@ static void shield_pressed(lv_event_t *e)
         s_shield = NULL;
     }
     if (was_off) {
-        ui_splash_wake();            /* full sleep gets the hello again;
+        ui_splash_show();            /* full sleep gets the hello again;
                                         paints while the panel is dark so
                                         the old screen never flashes */
         ota_kick();                  /* someone's here: good moment to pick

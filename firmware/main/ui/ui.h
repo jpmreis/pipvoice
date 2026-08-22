@@ -170,10 +170,11 @@ void ui_open_inbox(void);
  * shares a CPU and the LVGL lock with whatever else is running. */
 #define UI_SPLASH_MS 2100
 
-/* animated "Hello <owner>" splash; returns to home when it finishes.
- * Call under the LVGL lock (boot, or wake from full display-off). */
-void ui_splash_play(void);
-void ui_splash_wake(void);   /* instant + synchronous: for wake while dark */
+/* Animated "Hello <owner>" splash; returns to home when it finishes.
+ * Instant and synchronous: it is on the panel when this returns, so the
+ * caller can raise the backlight onto it. Call under the LVGL lock
+ * (boot, or wake from full display-off). */
+void ui_splash_show(void);
 
 #ifdef __cplusplus
 }

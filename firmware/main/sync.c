@@ -10,6 +10,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -356,13 +357,31 @@ static void fetch_inbox(void)
     if (changed && s_ev.inbox_changed) s_ev.inbox_changed();
 }
 
+/* anything older than 2023-11 means SNTP hasn't answered yet */
+#define CLOCK_SANE_EPOCH 1700000000
+/* how long a fresh boot waits for the clock before delivering anyway */
+#define CLOCK_WAIT_US    (2 * 60 * 1000000LL)
+
+static bool clock_set(void) { return time(NULL) >= CLOCK_SANE_EPOCH; }
+
 bool sync_dnd_active(void)
 {
+    if (!clock_set()) return false;        /* no clock: no verdict */
     time_t now = time(NULL);
-    if (now < 1700000000) return false;    /* clock not set yet (SNTP) */
     struct tm lt;
     localtime_r(&now, &lt);
     return lt.tm_hour >= DND_START_H || lt.tm_hour < DND_END_H;
+}
+
+bool sync_quiet_hold(void)
+{
+    /* A box that just powered on has no clock until SNTP answers, and
+     * "no clock" is not "daytime": a box plugged in at night delivered
+     * its held messages, chime and all, in the seconds before the time
+     * landed. Hold while we can't tell - but not forever, or a network
+     * that blocks NTP would swallow the inbox for good. */
+    if (!clock_set()) return esp_timer_get_time() < CLOCK_WAIT_US;
+    return sync_dnd_active();
 }
 
 static void sync_task(void *arg)
@@ -396,7 +415,7 @@ static void sync_task(void *arg)
         drain_rseen();       /* before fetch_reactions, so a just-seen
                                 badge can't be resurrected by the fetch */
         /* quiet hours: leave new mail on the server until morning */
-        if (!sync_dnd_active()) fetch_inbox();
+        if (!sync_quiet_hold()) fetch_inbox();
         fetch_reactions();
         theme_poll();   /* queued background download; serialized here so
                            only one TLS session runs at a time */

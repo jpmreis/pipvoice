@@ -90,19 +90,14 @@ void ui_open_inbox(void)
         nav_to(SCR_INBOX, LV_SCR_LOAD_ANIM_MOVE_LEFT);
 }
 
-void ui_splash_play(void)
+void ui_splash_show(void)
 {
-    if (nav_locked_out()) return;
-    scr_splash_show();                     /* set greeting + arm animations */
-    nav_to(SCR_SPLASH, LV_SCR_LOAD_ANIM_FADE_ON);
-}
-
-void ui_splash_wake(void)
-{
-    /* wake-from-display-off: the panel is still dark, so the splash must be
-     * on the panel BEFORE brightness returns. nav_to() won't do: its 180 ms
-     * load duration defers the actual screen switch to the next anim tick
-     * even for ANIM_NONE. lv_screen_load() is time-0 -> switches now. */
+    /* Both callers (boot, and waking from display-off) run with the panel
+     * dark, so the splash must be ON the panel before brightness returns
+     * - otherwise the light comes up on whatever was there before, which
+     * is a frame of home. nav_to() won't do: its 180 ms load duration
+     * defers the actual screen switch to the next anim tick even for
+     * ANIM_NONE. lv_screen_load() is time-0 -> switches now. */
     if (nav_locked_out()) return;
     scr_splash_show();
     s_cur = SCR_SPLASH;

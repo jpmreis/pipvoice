@@ -22,7 +22,13 @@ typedef struct {
  * not decide it is 3 a.m. and swallow the day's messages. */
 #define DND_START_H 21
 #define DND_END_H    8
-bool sync_dnd_active(void);
+bool sync_dnd_active(void);      /* definitely quiet hours (for the banner) */
+
+/* Should anything arriving stay silent right now? Quiet hours, or a
+ * fresh boot whose clock hasn't landed yet - "I don't know what time it
+ * is" must not be read as daytime. Bounded: if SNTP never answers, mail
+ * flows again a couple of minutes after boot. */
+bool sync_quiet_hold(void);
 
 void sync_init(const sync_events_t *ev);
 void sync_kick(void);            /* something to do (notify/outbox/wifi-up) */

@@ -333,7 +333,7 @@ static void ev_mqtt_notify(const char *payload)
                                                   : fr->valuestring;
             /* quiet hours cover reactions too - the badge still lands
              * below, it just arrives without a chime in the dark */
-            if (!sync_dnd_active()) {
+            if (!sync_quiet_hold()) {
                 audio_play_chime(CHIME_RECEIVED);
                 UI_LOCKED(ui_notify_reaction(name, re->valuestring));
             }
@@ -438,13 +438,20 @@ void app_main(void)
     };
     sync_init(&sync_ev);
 
-    /* Greeting: panel back on with home already themed behind it, then
-     * the animation gets a quiet system to run on. */
+    /* Greeting. ui_splash_show() puts it on the panel synchronously, so
+     * the light comes back on the splash itself - turning the backlight
+     * up first showed a frame of home before the animation started.
+     * Nothing else starts until the animation is done. */
+    UI_LOCKED(ui_splash_show());
     board_set_brightness(g_cfg.brightness);
-    UI_LOCKED(ui_splash_play());
+    vTaskDelay(pdMS_TO_TICKS(UI_SPLASH_MS + 300));
+
+    /* Both of these poll the PMU over I2C, and power_init's first battery
+     * read fires immediately - with a charger attached the AXP2101 has
+     * more to say, which is why the greeting only stuttered while plugged
+     * in. They cost nothing during a 2 s animation nobody can interrupt. */
     power_init(ev_battery);             /* battery poll + inactivity dimming */
     xTaskCreate(button_task, "buttons", 3072, NULL, 3, NULL);
-    vTaskDelay(pdMS_TO_TICKS(UI_SPLASH_MS + 300));
 
     /* Network last. esp_wifi_start() does RF calibration and brings up
      * driver tasks at priority 23, which preempt the LVGL task in bursts;

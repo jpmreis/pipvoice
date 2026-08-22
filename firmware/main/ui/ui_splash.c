@@ -1,5 +1,5 @@
 /* Pip UI - splash: animated "Pip" wordmark + "Hello <owner>" greeting.
- * Shown at boot and when waking from full display-off (see ui_splash_play). */
+ * Shown at boot and when waking from full display-off (see ui_splash_show). */
 #include "ui_internal.h"
 
 #define SPLASH_TOTAL_MS  UI_SPLASH_MS   /* app_main waits this out */
