@@ -12,6 +12,14 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [0.1.35] — 2026-08-23
+
+A PWA release. The firmware is identical to 0.1.34 apart from its
+version stamp — boxes will update, but nothing about them changes.
+Activating it is what the phones are here for: an installed PWA only
+hard-refreshes when the active version moves, so this is how the badge
+below reaches phones that are still running older app code.
+
 ### Added
 - The installed PWA now carries an unread count on its home-screen icon.
   The push carries the number so the badge is right even when the app has
