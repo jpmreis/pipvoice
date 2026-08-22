@@ -165,6 +165,11 @@ void ui_open_wifi_setup(void);       /* start setup mode + QR screen (also
 void ui_open_record_recent(void);    /* record screen, most recent contact */
 void ui_open_inbox(void);
 
+/* Length of the boot greeting. app_main keeps the heavy parts of boot
+ * (flash reads, network bring-up) out of this window: the animation
+ * shares a CPU and the LVGL lock with whatever else is running. */
+#define UI_SPLASH_MS 2100
+
 /* animated "Hello <owner>" splash; returns to home when it finishes.
  * Call under the LVGL lock (boot, or wake from full display-off). */
 void ui_splash_play(void);

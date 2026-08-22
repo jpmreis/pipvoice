@@ -382,6 +382,11 @@ void app_main(void)
     config_load();
     HEAPLOG("config");
     board_init();                       /* display + touch + LVGL running */
+    /* Panel dark until the greeting is ready. Everything between here and
+     * the splash reads flash and rebuilds widgets; none of it is worth
+     * watching, and showing it meant the animation had to share the CPU -
+     * and the LVGL lock - with the heaviest part of boot. */
+    board_set_brightness(0);
     HEAPLOG("board");
     storage_init();
 
@@ -408,10 +413,11 @@ void app_main(void)
     };
     UI_LOCKED(ui_init(&ui_cbs));
     UI_LOCKED(ui_set_owner_name(g_cfg.device_name));
-    UI_LOCKED(ui_splash_play());        /* boot greeting over the rest of init */
     UI_LOCKED(ui_settings_set_levels(g_cfg.speaker_volume, g_cfg.brightness));
     reload_inbox_ui();
-    theme_init();                       /* restore cached background */
+    theme_init();      /* 330 KB out of LittleFS, then a full re-theme
+                          under the LVGL lock: the one step that froze
+                          the greeting outright when they overlapped */
     HEAPLOG("ui");
 
     static const audio_events_t audio_ev = {
@@ -432,16 +438,24 @@ void app_main(void)
     };
     sync_init(&sync_ev);
 
-    power_init(ev_battery);
+    /* Greeting: panel back on with home already themed behind it, then
+     * the animation gets a quiet system to run on. */
+    board_set_brightness(g_cfg.brightness);
+    UI_LOCKED(ui_splash_play());
+    power_init(ev_battery);             /* battery poll + inactivity dimming */
+    xTaskCreate(button_task, "buttons", 3072, NULL, 3, NULL);
+    vTaskDelay(pdMS_TO_TICKS(UI_SPLASH_MS + 300));
 
+    /* Network last. esp_wifi_start() does RF calibration and brings up
+     * driver tasks at priority 23, which preempt the LVGL task in bursts;
+     * overlapping the greeting cost it frames for no benefit - nothing
+     * can arrive before the box is on home anyway. */
     net_mqtt_init(ev_mqtt_notify);
     HEAPLOG("mqtt");
     net_wifi_init(ev_wifi);
     net_wifi_start();
 
     ota_init();
-
-    xTaskCreate(button_task, "buttons", 3072, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "boot complete; heap: %u internal (%u largest), %u psram",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -456,10 +470,9 @@ void app_main(void)
              audio_codec_ok() ? "ok" : "err");
 
     /* fresh box (web-flashed, no WiFi yet): open WiFi setup with its QR
-     * once the splash settles, instead of sitting on "connecting" */
+     * instead of sitting on "connecting". The splash is already over by
+     * here - the network block above waits it out. */
     wifi_cred_t net0;
-    if (config_wifi_list(&net0, 1) == 0) {
-        vTaskDelay(pdMS_TO_TICKS(2600));
+    if (config_wifi_list(&net0, 1) == 0)
         UI_LOCKED(ui_open_wifi_setup());
-    }
 }

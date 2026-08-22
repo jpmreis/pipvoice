@@ -13,6 +13,12 @@ write entries for humans.
 ## [Unreleased]
 
 ### Fixed
+- The boot greeting no longer stutters. The splash used to animate on
+  top of the heaviest part of boot - the cached background being read
+  out of LittleFS and applied under the LVGL lock, and WiFi bring-up.
+  Boot now keeps the panel dark while that work happens, plays the
+  greeting on a quiet system, and starts the network afterwards
+  (online a couple of seconds later, which nothing is waiting on).
 - The "No WiFi" card no longer appears in the first three minutes after
   a boot: a box coming back from an OTA can spend a while
   re-associating, and the card popping up over a box that just updated

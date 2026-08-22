@@ -2,7 +2,7 @@
  * Shown at boot and when waking from full display-off (see ui_splash_play). */
 #include "ui_internal.h"
 
-#define SPLASH_TOTAL_MS  2100
+#define SPLASH_TOTAL_MS  UI_SPLASH_MS   /* app_main waits this out */
 #define DOT_REST_TY      12      /* dot settles at the wordmark baseline */
 
 static lv_obj_t   *s_scr;
