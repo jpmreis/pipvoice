@@ -74,6 +74,17 @@ def _device_payload(msg_id: str) -> str:
                        "dur": m["duration"] or 0}, separators=(",", ":"))
 
 
+def unread_count(user_id: int) -> int:
+    """Unheard messages waiting for this user. Rides along in the push so
+    the service worker can set the home-screen badge without a round trip
+    of its own - it has no other way to know the number while the app is
+    closed, and that is the only time a badge matters."""
+    with db.conn() as c:
+        return db.one(c, """SELECT COUNT(*) n FROM messages
+                            WHERE recipient=? AND delivered=0""",
+                      (user_id,))["n"]
+
+
 def message_created(recipient_id: int, msg_id: str, sender_name: str) -> None:
     if is_device_user(recipient_id):
         mqtt.notify_user(recipient_id, _device_payload(msg_id))
@@ -86,7 +97,7 @@ def message_created(recipient_id: int, msg_id: str, sender_name: str) -> None:
     # banner, so a "Pip" title would just repeat it
     accepted = push.send_to_user(recipient_id, {
         "title": sender_name, "body": "New voice message",
-        "msg_id": msg_id})
+        "msg_id": msg_id, "unread": unread_count(recipient_id)})
     if accepted == 0:
         send_email(recipient_id,
                    f"{sender_name} sent you a voice message on Pip",

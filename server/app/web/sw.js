@@ -90,6 +90,18 @@ async function prefetchMessage(id) {
   await trimAudioCache(c);
 }
 
+/* Home-screen badge, from the count the push carries (notify.py). This is
+   the case that actually needs a badge: with the app open, app.js keeps it
+   honest itself. Reaction pushes send no count and leave it alone - the
+   badge counts unheard messages, and a reaction isn't one. */
+function setAppBadge(n) {
+  if (typeof n !== "number" || n < 0) return;
+  try {
+    const p = n > 0 ? navigator.setAppBadge?.(n) : navigator.clearAppBadge?.();
+    p?.catch(() => {});
+  } catch (err) {}
+}
+
 self.addEventListener("push", (e) => {
   let data = {};
   try { data = e.data.json(); } catch (err) {}
@@ -104,6 +116,7 @@ self.addEventListener("push", (e) => {
       tag: data.msg_id || "pip",
       data: { msg_id: data.msg_id || "" },
     });
+    setAppBadge(data.unread);
     try { await prefetchMessage(data.msg_id); } catch (err) {}
     // an app already open shouldn't wait out its 60 s poll to show the row
     for (const cl of await self.clients.matchAll(

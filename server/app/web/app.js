@@ -512,6 +512,28 @@ async function pickReaction(k) {
   } catch (e) { toast("Could not react", "danger"); }
 }
 
+/* ---------------- unread count ----------------
+   The pill on the inbox tab and, on an installed PWA, the badge on the
+   home-screen icon. One function because three call sites each kept their
+   own copy of this arithmetic and delete quietly forgot to run it. */
+function refreshUnread() {
+  const n = inbox.filter(m => !m.delivered).length;
+  $("inbox-badge").style.display = n ? "inline-flex" : "none";
+  $("inbox-badge").textContent = n;
+  setAppBadge(n);
+}
+
+/* Home-screen badge. Wants an installed PWA and notification permission -
+   on iOS the same pair web push already needs, so anyone getting Pip
+   notifications can carry one. A no-op in a plain tab, and on Firefox.
+   Nothing here is worth an error: a badge is decoration. */
+function setAppBadge(n) {
+  try {
+    const p = n > 0 ? navigator.setAppBadge?.(n) : navigator.clearAppBadge?.();
+    p?.catch(() => {});
+  } catch (e) {}
+}
+
 let knownMsgIds = null;
 async function loadInbox() {
   inbox = await api("/inbox");
@@ -524,9 +546,7 @@ async function loadInbox() {
   const el = $("inbox");
   el.innerHTML = "";
   $("inbox-empty").style.display = inbox.length ? "none" : "block";
-  const unheard = inbox.filter(m => !m.delivered).length;
-  $("inbox-badge").style.display = unheard ? "inline-flex" : "none";
-  $("inbox-badge").textContent = unheard;
+  refreshUnread();
   for (const m of inbox) {
     const row = document.createElement("div");
     row.className = "msg" + (m.delivered ? "" : " unheard");
@@ -622,9 +642,7 @@ async function playMessage(m, row) {
     m.delivered = true;
     row.classList.remove("unheard");
     api(`/messages/${m.id}/ack`, { method: "POST" }).catch(() => {});
-    const unheard = inbox.filter(x => !x.delivered).length;
-    $("inbox-badge").style.display = unheard ? "inline-flex" : "none";
-    $("inbox-badge").textContent = unheard;
+    refreshUnread();
   }
 }
 
@@ -636,6 +654,7 @@ async function delMessage(m, row) {
   row.remove();
   inbox = inbox.filter(x => x.id !== m.id);
   $("inbox-empty").style.display = inbox.length ? "none" : "block";
+  refreshUnread();          // deleting an unheard message lowers the count
   toast("Deleted");
 }
 
@@ -834,6 +853,7 @@ $("set-test").onclick = async () => {
 $("set-logout").onclick = async () => {
   try { await api("/auth/logout", { method: "POST" }); } catch (e) {}
   me = null;
+  setAppBadge(0);      // a signed-out phone must not wear someone's count
   showLogin();
 };
 

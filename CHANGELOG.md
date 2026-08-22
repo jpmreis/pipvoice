@@ -12,6 +12,17 @@ write entries for humans.
 
 ## [Unreleased]
 
+### Added
+- The installed PWA now carries an unread count on its home-screen icon.
+  The push carries the number so the badge is right even when the app has
+  never been opened; playing, deleting or signing out updates it.
+  Requires an installed app and notification permission — on iOS the same
+  pair web push already needs — and is silently absent everywhere else.
+
+### Fixed
+- Deleting an unheard message left the inbox tab's count one too high
+  until the next refresh.
+
 ## [0.1.34] — 2026-08-23
 
 Notifications and messages used to race, and on weak wifi the

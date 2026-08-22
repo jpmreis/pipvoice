@@ -283,7 +283,7 @@ ok(r.status_code == 200, "push subscribe stored")
 
 pushes = []
 real_webpush = pywebpush.webpush
-pywebpush.webpush = lambda *a, **k: pushes.append(1)
+pywebpush.webpush = lambda *a, **k: pushes.append(a[1])  # (sub_info, json)
 vmsg_b = b"VMSG" + bytes(8) + b"\x02\x00ab" * 50
 r = web.post("/v1/messages", headers=H_G,
              data={"recipient_id": "webby", "duration": "1"},
@@ -302,6 +302,10 @@ r = web.post("/v1/messages", headers=H_G,
 seq_id = r.json()["id"]
 ok(len(pushes) == 1 and _os.path.exists(adb.playback_path(seq_id)),
    "playback file rendered before the push fires")
+# the home-screen badge count rides along: the service worker has no other
+# way to know it while the app is closed. webby has wmid2 + seq_id unheard.
+ok(_json.loads(pushes[0])["unread"] == 2,
+   "push carries the unread count for the app badge")
 # ...and a message libopus can't render still gets announced
 ok(not _os.path.exists(adb.playback_path(wmid2)) and len(pushes) == 1,
    "unrenderable audio still pushes (client falls back to the wav)")
