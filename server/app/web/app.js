@@ -96,11 +96,14 @@ async function refreshApp() {
   try {
     const reg = await navigator.serviceWorker?.getRegistration();
     if (reg) await reg.update();
-    // drop the cached shell but KEEP theme images: they are content-hashed
-    // (?v=), so an update never stales them - wiping them here would force
-    // a background re-download after every release
+    // drop the cached shell but KEEP theme images and prefetched message
+    // audio: both are immutable at their URL (themes are content-hashed,
+    // a message id names one recording forever), so an update never stales
+    // them - wiping them would force a re-download after every release,
+    // and for audio that means losing a prefetch a message is waiting on
     if (window.caches)
       for (const k of await caches.keys()) {
+        if (k === AUDIO_CACHE) continue;
         const c = await caches.open(k);
         for (const req of await c.keys())
           if (!new URL(req.url).pathname.startsWith("/v1/themes/"))
@@ -544,6 +547,58 @@ async function loadInbox() {
     addLongPress(row, () => openReactSheet(m, row));
     el.appendChild(row);
   }
+  // hold blobs only for what is still in the inbox, and get the newest
+  // unheard ones ready before they are tapped
+  const live = new Set(inbox.map(m => m.id));
+  for (const id of [...audioUrls.keys()]) if (!live.has(id)) forgetAudio(id);
+  for (const m of inbox.filter(m => !m.delivered).slice(0, AUDIO_WARM))
+    warmAudio(m.id);
+}
+
+/* ---------------- message audio ----------------
+   The service worker prefetches a message's audio into AUDIO_CACHE the
+   moment its push lands (sw.js), so by the time the app is opened the
+   bytes are usually already on the phone. We resolve them to object URLs
+   *ahead* of the tap and keep them in a map, because play() has to be
+   called synchronously inside the click handler — an await in between
+   loses the user gesture and iOS refuses to start the audio.
+
+   A miss is never fatal: the src falls back to the network URL, which is
+   what every play did before this existed. */
+const AUDIO_CACHE = "pip-audio-v1";      // must match sw.js
+const AUDIO_WARM = 3;                    // newest unheard, the likely taps
+const audioUrls = new Map();             // msg id -> object URL (or null)
+
+function msgAudioPath(id) { return `/v1/messages/${id}/audio.m4a`; }
+
+async function warmAudio(id) {
+  if (audioUrls.has(id)) return;
+  audioUrls.set(id, null);               // claim it: no duplicate fetches
+  try {
+    const url = msgAudioPath(id);
+    let r = null;
+    if (window.caches) {
+      const c = await caches.open(AUDIO_CACHE);
+      r = await c.match(url);
+      if (!r) {
+        r = await fetch(url);
+        if (r.ok) await c.put(url, r.clone());
+      }
+    } else {
+      r = await fetch(url);
+    }
+    if (r && r.ok) audioUrls.set(id, URL.createObjectURL(await r.blob()));
+    else audioUrls.delete(id);           // retry on the next render
+  } catch (e) { audioUrls.delete(id); }
+}
+
+function forgetAudio(id) {
+  const u = audioUrls.get(id);
+  if (u) URL.revokeObjectURL(u);
+  audioUrls.delete(id);
+  if (window.caches)
+    caches.open(AUDIO_CACHE)
+      .then(c => c.delete(msgAudioPath(id))).catch(() => {});
 }
 
 const player = new Audio();
@@ -558,7 +613,8 @@ player.addEventListener("ended", stopPlayback);
 async function playMessage(m, row) {
   if (playingRow === row) { stopPlayback(); return; }
   stopPlayback();
-  player.src = `/v1/messages/${m.id}/audio.wav`;
+  // set before the first await, so the tap still counts as a user gesture
+  player.src = audioUrls.get(m.id) || msgAudioPath(m.id);
   try { await player.play(); } catch (e) { toast("Playback failed", "danger"); return; }
   row.classList.add("playing");
   playingRow = row;
@@ -576,6 +632,7 @@ async function delMessage(m, row) {
   if (!confirm(`Delete the message from ${m.sender_name}?`)) return;
   if (playingRow === row) stopPlayback();
   await api(`/messages/${m.id}`, { method: "DELETE" });
+  forgetAudio(m.id);
   row.remove();
   inbox = inbox.filter(x => x.id !== m.id);
   $("inbox-empty").style.display = inbox.length ? "none" : "block";
@@ -899,6 +956,23 @@ document.addEventListener("visibilitychange", () => {
   }
   if (me) syncPushIfGranted();
 });
+
+/* The service worker tells us the moment a push lands, so an app that is
+   already open picks the message up now instead of on its next 60 s poll.
+   loadInbox warms the audio for what it renders; when we're elsewhere in
+   the app, warm it directly so it's ready if the user navigates home. */
+navigator.serviceWorker?.addEventListener("message", (e) => {
+  if (!e.data || e.data.type !== "new-message") return;
+  if (me && $("scr-home").classList.contains("on")) {
+    loadInbox().catch(() => {});
+    loadReactions();
+  } else if (e.data.msg_id) {
+    warmAudio(e.data.msg_id);
+  }
+});
+// messages to an addEventListener (rather than onmessage) listener stay
+// queued until this is called - without it the first one can be lost
+navigator.serviceWorker?.startMessages?.();
 setInterval(() => {
   if (document.hidden) return;
   checkVersion();

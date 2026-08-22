@@ -168,5 +168,30 @@ def audio_path(msg_id: str) -> str:
     return os.path.join(AUDIO_DIR, f"{msg_id}.vmsg")
 
 
+def playback_path(msg_id: str) -> str:
+    """Browser-playable rendering of the same message (vmsg.ensure_playback
+    creates it). Derived, never authoritative: deleting it costs a re-render,
+    and it goes wherever the .vmsg goes."""
+    return os.path.join(AUDIO_DIR, f"{msg_id}.m4a")
+
+
+# every on-disk rendering of one message: the .vmsg the boxes download and
+# the .m4a the PWA plays. They live and die together — the .m4a is derived,
+# so leaving one behind is a privacy leak, not a cache hit.
+AUDIO_EXTS = (".vmsg", ".m4a")
+
+
+def drop_audio(msg_id: str) -> bool:
+    """Remove every rendering of a message. True if anything was there."""
+    gone = False
+    for path in (audio_path(msg_id), playback_path(msg_id)):
+        try:
+            os.remove(path)
+            gone = True
+        except FileNotFoundError:
+            pass
+    return gone
+
+
 def firmware_path(version: str) -> str:
     return os.path.join(FIRMWARE_DIR, f"{version}.bin")

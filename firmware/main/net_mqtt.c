@@ -24,9 +24,13 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
             break;
         }
         case MQTT_EVENT_DATA: {
-            /* 256: reaction events (~140 B with long names) must not
-             * truncate mid-JSON */
-            char payload[256] = {0};
+            /* 384: the largest event is now a new-message notify carrying
+             * the sender, colour, timestamp and duration (~190 B with long
+             * names); reaction events are ~140 B. Truncating mid-JSON is
+             * not fatal - the parse fails and sync falls back to listing
+             * the inbox - but it costs the fast path, so leave headroom.
+             * This is the MQTT task's stack; keep it modest. */
+            char payload[384] = {0};
             int n = ev->data_len;
             if (n > (int)sizeof(payload) - 1) n = sizeof(payload) - 1;
             if (n > 0) memcpy(payload, ev->data, n);

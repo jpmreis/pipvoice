@@ -270,8 +270,18 @@ bool http_download_audio(const char *msg_id, const char *dest_path)
                 int r;
                 while ((r = esp_http_client_read(c, buf, sizeof(buf))) > 0)
                     fwrite(buf, 1, r, f);
-                fclose(f);
-                ok = true;
+                /* A weak link drops connections mid-body, and this used to
+                 * call any partial file a success: the box kept a truncated
+                 * .vmsg forever (the inbox mirror never re-downloads what it
+                 * already has) and played a message that cut off. Only a
+                 * complete body counts; a partial one is unlinked so the
+                 * next sync fetches it again. */
+                ok = (fclose(f) == 0) &&
+                     esp_http_client_is_complete_data_received(c);
+                if (!ok) {
+                    ESP_LOGW(TAG, "audio %s truncated, will retry", msg_id);
+                    remove(dest_path);
+                }
             }
         }
         esp_http_client_close(c);

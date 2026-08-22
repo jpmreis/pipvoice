@@ -22,6 +22,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG = "app";
@@ -342,7 +343,36 @@ static void ev_mqtt_notify(const char *payload)
             sync_reaction_add(fr->valuestring, name, re->valuestring);
         }
     } else {
-        sync_kick();
+        /* new message. Servers from 0.1.34 on put the sender, colour,
+         * timestamp and duration in the notify, which is everything the
+         * .meta needs - so sync can download the audio straight away
+         * instead of asking for the inbox listing first. An older server,
+         * or a payload too long for the buffer above, leaves us with no
+         * metadata and we fall back to listing. */
+        const cJSON *mid = cJSON_GetObjectItem(root, "msg_id");
+        const cJSON *fr  = cJSON_GetObjectItem(root, "from");
+        const cJSON *fn  = cJSON_GetObjectItem(root, "from_name");
+        const cJSON *co  = cJSON_GetObjectItem(root, "color");
+        const cJSON *ts  = cJSON_GetObjectItem(root, "ts");
+        const cJSON *du  = cJSON_GetObjectItem(root, "dur");
+        if (cJSON_IsString(mid) && cJSON_IsString(fr) && cJSON_IsNumber(ts)) {
+            http_inbox_item_t m = {0};
+            strlcpy(m.id, mid->valuestring, UI_ID_LEN);
+            strlcpy(m.sender_id, fr->valuestring, UI_ID_LEN);
+            strlcpy(m.sender_name,
+                    cJSON_IsString(fn) ? fn->valuestring : fr->valuestring,
+                    UI_NAME_LEN);
+            m.sender_color = cJSON_IsString(co)
+                           ? (uint32_t)strtoul(co->valuestring, NULL, 16)
+                           : 0x999999;
+            /* m.when stays empty: storage renders the clock from ts at
+             * load time, so the string only matters for pre-epoch metas */
+            m.ts = (uint32_t)ts->valuedouble;
+            m.duration_s = cJSON_IsNumber(du) ? (uint16_t)du->valueint : 0;
+            sync_message_hint(&m);
+        } else {
+            sync_inbox_kick();
+        }
     }
     cJSON_Delete(root);
 }

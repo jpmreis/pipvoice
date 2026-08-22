@@ -3,6 +3,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "net_http.h"
 #include "ui.h"
 
 typedef struct {
@@ -33,6 +34,20 @@ bool sync_quiet_hold(void);
 void sync_init(const sync_events_t *ev);
 void sync_kick(void);            /* something to do (notify/outbox/wifi-up) */
 void sync_contacts_kick(void);   /* contact list changed server-side */
+
+/* ---- new mail, fast ----
+ * The MQTT new-message notify carries the message's metadata, so the box
+ * can fetch its audio directly instead of listing the inbox first - one
+ * fewer TLS handshake before the chime, which is most of the wait on a
+ * weak link. Hand the notify to sync_message_hint(); it queues the item
+ * and wakes the task, which delivers it ahead of the rest of the sync
+ * ladder. Safe to call from the MQTT task (it does no network I/O).
+ *
+ * sync_inbox_kick() is the fallback for a notify we couldn't read
+ * metadata out of: same priority, but it lists the inbox to find out
+ * what arrived. */
+void sync_message_hint(const http_inbox_item_t *m);
+void sync_inbox_kick(void);
 
 /* last fetched contact list (valid until the next sync pass) */
 const ui_contact_t *sync_contacts(uint8_t *count);

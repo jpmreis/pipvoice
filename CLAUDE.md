@@ -89,6 +89,28 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
   (offline boxes OTA on reconnect); the `{"event":"contacts"}` notify
   **must stay non-retained** or it replaces the retained firmware notify
   and breaks OTA-on-reconnect.
+- **A notify is a promise the message is fetchable now.** Nothing
+  announces before the bytes the client will ask for exist: the audio is
+  written before the row is inserted, the phone's `.m4a` is rendered
+  before the push, and `POST /v1/messages` hands the notify to a
+  background task so a single-worker server isn't blocked serving the
+  recipient it just woke. Adding a notify path means keeping that order.
+- The new-message notify to a **box** carries `msg_id/from/from_name/
+  color/ts/dur` so `sync.c` can fetch the audio without listing the
+  inbox first (one TLS handshake instead of two — that is most of
+  delivery latency on weak wifi). The firmware reads it into a fixed
+  384 B buffer; keep the payload well under that. Truncation isn't
+  fatal — the parse fails and sync falls back to `GET /v1/inbox` — but
+  it costs the fast path. Old firmware ignores the extra keys.
+- A box chimes when the message is **on its flash**, not when the ack
+  lands (`deliver_one` in sync.c). Don't put network calls back in front
+  of `s_ev.new_message`.
+- Message audio exists twice on the server: `<id>.vmsg` (what boxes
+  download, authoritative) and a derived `<id>.m4a` (what browsers
+  play, ~8x smaller than the WAV path it replaced). They live and die
+  together — `db.drop_audio()` is the only correct way to delete either,
+  since a stray `.m4a` is a privacy leak, not a cache hit. `audio.wav`
+  stays served for phones running an older cached `app.js`.
 - A user is either a device user or a phone user, never both — derived
   from `devices` rows, no schema flag.
 - Auth modes: `PIP_LOCAL_AUTH=1` (self-host) enables scrypt local

@@ -72,6 +72,18 @@ r = c.post("/v1/messages", headers=H_E,
 ok(r.status_code == 200, "message uploaded")
 mid = r.json()["id"]
 
+# the box's MQTT notify carries the whole .meta so it can fetch the audio
+# directly instead of listing the inbox first (one TLS handshake, not two),
+# and must stay small enough for the firmware's fixed payload buffer
+from app import notify as _notify
+import json as _json
+_p = _notify._device_payload(mid)
+_d = _json.loads(_p)
+ok(_d["msg_id"] == mid and _d["from"] == "ella" and _d["from_name"] == "Ella"
+   and _d["dur"] == 7 and _d["ts"] > 1700000000 and len(_d["color"]) == 6,
+   "device notify carries sender, colour, ts and duration")
+ok(len(_p) < 256, f"device notify fits the firmware buffer ({len(_p)} B)")
+
 # --- permission enforcement: grandma has no perm towards papa ---
 # email-code login: unknown address answers ok (no enumeration), wrong and
 # expired codes fail, a planted good code signs in and is single-use
@@ -240,9 +252,14 @@ ok(r.status_code == 200 and r.content[:4] == b"VMSG",
 hdr = _st.unpack_from("<4H", r.content, 4)
 ok(hdr[:3] == (1, 160, 20), "vmsg header matches firmware format")
 
-# --- browser playback: decoded WAV + delivered flag lifecycle ---
+# --- browser playback: compressed m4a, legacy WAV, delivered lifecycle ---
+r = web.get(f"/v1/messages/{wmid}/audio.m4a", headers=H_G)
+ok(r.status_code == 200 and r.content[4:8] == b"ftyp", "audio.m4a is an MP4")
+m4a_len = len(r.content)
 r = web.get(f"/v1/messages/{wmid}/audio.wav", headers=H_G)
 ok(r.status_code == 200 and r.content[:4] == b"RIFF", "audio.wav decodes to WAV")
+ok(m4a_len * 3 < len(r.content),
+   f"m4a is far smaller than the wav ({m4a_len} vs {len(r.content)})")
 r = web.get("/v1/inbox", headers=H_G)
 ok(r.json()[0]["delivered"] is False, "inbox exposes delivered=false")
 web.post(f"/v1/messages/{wmid}/ack", headers=H_G)
@@ -274,6 +291,23 @@ r = web.post("/v1/messages", headers=H_G,
 ok(r.status_code == 200 and len(pushes) == 1,
    "notify ladder: phone user got web push (no MQTT)")
 wmid2 = r.json()["id"]
+
+# a push is a promise the message is fetchable: the compressed file the
+# service worker prefetches must exist before the push goes out. Sent here
+# with a real recording, since vmsg_b above is a stub libopus rejects.
+pushes.clear()
+r = web.post("/v1/messages", headers=H_G,
+             data={"recipient_id": "webby", "duration": "1"},
+             files={"audio": ("m.audio", io.BytesIO(wav))})
+seq_id = r.json()["id"]
+ok(len(pushes) == 1 and _os.path.exists(adb.playback_path(seq_id)),
+   "playback file rendered before the push fires")
+# ...and a message libopus can't render still gets announced
+ok(not _os.path.exists(adb.playback_path(wmid2)) and len(pushes) == 1,
+   "unrenderable audio still pushes (client falls back to the wav)")
+pweb.delete(f"/v1/messages/{seq_id}")          # webby is the recipient
+ok(not _os.path.exists(adb.playback_path(seq_id)),
+   "delete removes the playback rendering too")
 
 def dead(*a, **k):
     raise pywebpush.WebPushException(

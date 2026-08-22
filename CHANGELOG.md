@@ -12,6 +12,48 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [0.1.34] — 2026-08-23
+
+Notifications and messages used to race, and on weak wifi the
+notification kept winning: a banner or a chime, then seconds of nothing
+before the message was actually there. This release makes a notify mean
+"the message is fetchable now", and takes the waiting out of what
+happens after one.
+
+### Changed
+- Voice messages are served to phones as AAC in MP4 instead of
+  uncompressed WAV — about 8x smaller (a 20 s message goes from ~640 KB
+  to ~80 KB). Rendered once when the message is sent and cached beside
+  the recording; older messages and older clients still get the WAV.
+- The PWA's service worker downloads a message's audio as soon as its
+  push arrives, so it is already on the phone by the time the
+  notification is tapped, and playback starts from local storage
+  instead of opening a connection on a phone that has just woken up.
+- An open PWA now shows a new message the moment its push lands,
+  instead of on its next 60 s poll.
+- Boxes get the sender, colour, timestamp and duration inside the MQTT
+  notify, so they fetch the audio directly instead of asking for the
+  inbox listing first. That is one fewer TLS handshake — four round
+  trips — before the chime.
+- A box chimes as soon as a message is on its flash. It used to wait
+  for the server to be told the message had been delivered, which on a
+  weak link was another handshake of silence after the message had
+  already arrived.
+- New mail jumps the queue on a box: an arriving message is fetched
+  before the contact refresh, outbox upload, or theme download that
+  would otherwise hold the device's single TLS slot.
+
+### Fixed
+- Sending a message no longer stalls the whole server while the
+  recipient is notified. Encoding the audio and delivering web push
+  (up to 10 s per subscription) ran on the event loop, and there is one
+  worker — so the recipient's phone, woken by that very push, was
+  queueing behind it.
+- A voice message whose download was cut short is no longer kept as if
+  it were complete. Boxes mirror the server inbox and never re-fetch
+  what they already have, so a truncated recording stayed truncated;
+  partial downloads are now discarded and retried.
+
 ## [0.1.33] — 2026-08-22
 
 ### Fixed

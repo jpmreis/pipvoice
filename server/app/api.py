@@ -1,6 +1,7 @@
 """api: /v1 endpoints. Serves both device tokens and PWA user session
 tokens (cookie or Bearer) through the same identity abstraction — a
 message always flows user -> user, so the sender's client never matters."""
+import asyncio
 import hashlib
 import logging
 import os
@@ -522,8 +523,14 @@ def setup_nvs(nonce: str, ident: Identity = AuthDep):
 
 
 # ---------- send ----------
+def _write_audio(msg_id: str, data: bytes) -> None:
+    with open(db.audio_path(msg_id), "wb") as f:
+        f.write(data)
+
+
 @router.post("/messages")
-async def send_message(ident: Identity = AuthDep,
+async def send_message(bg: BackgroundTasks,
+                       ident: Identity = AuthDep,
                        recipient_id: str = Form(...),
                        duration: int = Form(0),
                        audio: UploadFile = None):
@@ -553,22 +560,31 @@ async def send_message(ident: Identity = AuthDep,
         raise HTTPException(413, "audio too large")
     if not data.startswith(b"VMSG"):
         # browser upload (AAC/MP4, WebM/Opus, ...): transcode to the
-        # firmware's container; duration is recomputed server-side
+        # firmware's container; duration is recomputed server-side.
+        # Off-thread: this forks ffmpeg and then Opus-encodes the whole
+        # recording, and there is exactly one uvicorn worker - doing it on
+        # the event loop stalled every other request, including the
+        # recipient's inbox fetch that our own push had just triggered.
         try:
-            data, duration = vmsg.transcode_to_vmsg(data, MAX_MSG_S)
+            data, duration = await asyncio.to_thread(
+                vmsg.transcode_to_vmsg, data, MAX_MSG_S)
         except ValueError as e:
             raise HTTPException(400, str(e))
 
     # ms-timestamp prefix + random suffix: still 32 hex chars, but ids sort
     # chronologically - device inbox ordering relies on this (storage.c)
     msg_id = f"{int(time.time() * 1000):016x}{secrets.token_hex(8)}"
-    with open(db.audio_path(msg_id), "wb") as f:
-        f.write(data)
+    await asyncio.to_thread(_write_audio, msg_id, data)
     with db.conn() as c:
         c.execute("""INSERT INTO messages (id,sender,recipient,duration)
                      VALUES (?,?,?,?)""",
                   (msg_id, ident.user_id, rcpt["id"], duration))
-    notify.message_created(rcpt["id"], msg_id, ident.display_name)
+    # After the response, in a worker thread: notifying means a webpush per
+    # subscription at up to 10 s each, and the sender has no reason to wait
+    # on it. The audio and the row are already in place, so the promise a
+    # notify makes still holds the moment it fires.
+    bg.add_task(notify.message_created, rcpt["id"], msg_id,
+                ident.display_name)
     return {"id": msg_id}
 
 
@@ -609,9 +625,25 @@ def download(msg_id: str, ident: Identity = AuthDep):
     return FileResponse(path, media_type="application/octet-stream")
 
 
+@router.get("/messages/{msg_id}/audio.m4a")
+def download_m4a(msg_id: str, ident: Identity = AuthDep):
+    """Browser playback. Normally rendered at send time (notify.py) and
+    served straight off disk; rendered here on demand for messages that
+    predate the .m4a cache, or whose render failed."""
+    _owned_message(ident, msg_id)
+    path = vmsg.ensure_playback(msg_id)
+    if not path:
+        raise HTTPException(410, "audio expired")
+    # immutable by id: a message's audio never changes under the same URL,
+    # so the service worker and the HTTP cache can both hold it forever
+    return FileResponse(path, media_type="audio/mp4", headers={
+        "Cache-Control": "private, max-age=31536000, immutable"})
+
+
 @router.get("/messages/{msg_id}/audio.wav")
 def download_wav(msg_id: str, ident: Identity = AuthDep):
-    """Browser playback: the .vmsg decoded to WAV."""
+    """Browser playback for clients still running an older cached app.js:
+    the .vmsg decoded to WAV. New clients use audio.m4a."""
     _owned_message(ident, msg_id)
     path = db.audio_path(msg_id)
     if not os.path.exists(path):
@@ -723,10 +755,7 @@ def delete(msg_id: str, ident: Identity = AuthDep):
     _owned_message(ident, msg_id)
     with db.conn() as c:
         c.execute("DELETE FROM messages WHERE id=?", (msg_id,))
-    try:
-        os.remove(db.audio_path(msg_id))
-    except FileNotFoundError:
-        pass
+    db.drop_audio(msg_id)
     return {"ok": True}
 
 

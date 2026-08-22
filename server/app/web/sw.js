@@ -1,11 +1,19 @@
 /* Pip service worker: web push + a light network-first shell cache.
    Push is the real job here; offline support is incidental. */
 "use strict";
-const CACHE = "pip-v4";
+const CACHE = "pip-v5";
 const SHELL = ["./", "style.css", "app.js", "manifest.json", "install.html",
   "setup.html", "setup.js", "vendor/esptool-js.js",
   "fonts/montserrat-400.woff2", "fonts/montserrat-600.woff2",
   "fonts/montserrat-700.woff2", "icons/icon-192.png"];
+
+/* Message audio, prefetched on push and read back by app.js. Its own cache
+   so a shell version bump doesn't throw away a message that arrived but
+   hasn't been played yet. Bounded: these are the only entries here that
+   grow without limit. */
+const AUDIO_CACHE = "pip-audio-v1";
+const AUDIO_KEEP = 12;
+const audioPath = (id) => `/v1/messages/${id}/audio.m4a`;
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
@@ -15,7 +23,7 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil((async () => {
     for (const k of await caches.keys())
-      if (k !== CACHE) await caches.delete(k);
+      if (k !== CACHE && k !== AUDIO_CACHE) await caches.delete(k);
     await self.clients.claim();
   })());
 });
@@ -58,15 +66,50 @@ self.addEventListener("fetch", (e) => {
   })());
 });
 
+async function trimAudioCache(c) {
+  const keys = await c.keys();          // insertion order: oldest first
+  for (let i = 0; i < keys.length - AUDIO_KEEP; i++) await c.delete(keys[i]);
+}
+
+/* Pull the message down while the phone is still in a pocket.
+
+   A push only says a message exists. Without this nothing is downloaded
+   until the tap, so on weak wifi the banner genuinely does arrive well
+   ahead of the message — the notification and the audio were racing, and
+   the audio started last. The server renders the .m4a before it pushes
+   (notify.py), so by the time we get here the file is guaranteed to be
+   sitting there ready. */
+async function prefetchMessage(id) {
+  if (!id || !self.caches) return;
+  const url = audioPath(id);
+  const c = await caches.open(AUDIO_CACHE);
+  if (await c.match(url)) return;
+  const r = await fetch(url, { credentials: "same-origin" });
+  if (!r.ok) return;      // signed out, or the audio aged out: not fatal
+  await c.put(url, r);
+  await trimAudioCache(c);
+}
+
 self.addEventListener("push", (e) => {
   let data = {};
   try { data = e.data.json(); } catch (err) {}
-  e.waitUntil(self.registration.showNotification(data.title || "Pip", {
-    body: data.body || "New voice message",
-    icon: "icons/icon-192.png",
-    tag: data.msg_id || "pip",
-    data: { msg_id: data.msg_id || "" },
-  }));
+  e.waitUntil((async () => {
+    // Banner first, always. A push event gets a limited budget, and if it
+    // ends without a notification the browser posts its own "site updated
+    // in the background" notice instead — a slow prefetch must never cost
+    // us the banner it is trying to make useful.
+    await self.registration.showNotification(data.title || "Pip", {
+      body: data.body || "New voice message",
+      icon: "icons/icon-192.png",
+      tag: data.msg_id || "pip",
+      data: { msg_id: data.msg_id || "" },
+    });
+    try { await prefetchMessage(data.msg_id); } catch (err) {}
+    // an app already open shouldn't wait out its 60 s poll to show the row
+    for (const cl of await self.clients.matchAll(
+                       { type: "window", includeUncontrolled: true }))
+      cl.postMessage({ type: "new-message", msg_id: data.msg_id || "" });
+  })());
 });
 
 self.addEventListener("notificationclick", (e) => {

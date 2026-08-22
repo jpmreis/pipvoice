@@ -24,6 +24,8 @@ static const char *TAG = "sync";
 static sync_events_t     s_ev;
 static SemaphoreHandle_t s_wake;
 static volatile bool     s_contacts_force;   /* server says the list changed */
+static volatile bool     s_inbox_first;      /* new mail: list it before the
+                                                rest of the ladder runs   */
 static ui_contact_t      s_contacts[UI_MAX_CONTACTS];
 static uint8_t           s_contact_count;
 static ui_theme_info_t   s_themes[UI_MAX_THEMES];
@@ -286,6 +288,98 @@ void sync_touch_contact(const char *contact_id)
     if (s_ev.contacts_changed) s_ev.contacts_changed();
 }
 
+/* Download one message and announce it. Shared by the inbox poll and the
+ * MQTT fast path below, so both write the same .meta and chime the same
+ * way. Returns true when something landed. */
+static bool deliver_one(const http_inbox_item_t *m, bool *touched)
+{
+    if (storage_inbox_has(m->id)) return false;
+    if (storage_trash_has(m->id)) return false;   /* deleted locally,
+                                     server delete still pending */
+    storage_evict_if_needed();
+    char path[96];
+    snprintf(path, sizeof(path), INBOX_DIR "/%.*s.vmsg", UI_ID_LEN - 1, m->id);
+    if (!http_download_audio(m->id, path)) return false;
+
+    storage_inbox_meta_write(m->id, m->sender_name, m->sender_color,
+                             m->when, m->duration_s, false,
+                             m->sender_id, m->ts, m->reaction);
+    *touched |= touch_quiet(m->sender_id);
+    /* Chime here, not after the ack. The message is on flash and its meta
+     * is written - it has arrived, as far as anyone in the house is
+     * concerned. The ack is bookkeeping for the server, and it used to run
+     * first: a whole TLS handshake of silence after the audio had already
+     * landed, which on weak wifi is exactly the delay this release is
+     * about. It still runs, just behind the news. */
+    if (s_ev.new_message) s_ev.new_message(m->sender_name);
+    ESP_LOGI(TAG, "downloaded %s from %s", m->id, m->sender_name);
+    http_ack_message(m->id);
+    return true;
+}
+
+/* ---------------- fast path: the notify said what arrived ----------------
+ * A new-message MQTT notify carries the message's metadata, so the box can
+ * skip GET /inbox and fetch the audio straight away - one TLS handshake off
+ * the gap between the sender letting go of the button and this box
+ * chiming. Hints are advisory in every direction: a full queue drops them,
+ * a failed download leaves them, quiet hours discard them. The poll behind
+ * this still lists the inbox and still reconciles, so nothing is ever lost
+ * by ignoring a hint. */
+#define HINT_MAX 4
+static http_inbox_item_t  s_hints[HINT_MAX];
+static volatile uint8_t   s_hint_n;   /* volatile for drain_hints' unlocked
+                                         "anything waiting?" peek */
+static SemaphoreHandle_t  s_hint_lock;     /* MQTT task fills, sync drains */
+
+void sync_message_hint(const http_inbox_item_t *m)
+{
+    if (!s_hint_lock) return;
+    xSemaphoreTake(s_hint_lock, portMAX_DELAY);
+    if (s_hint_n < HINT_MAX) s_hints[s_hint_n++] = *m;
+    xSemaphoreGive(s_hint_lock);
+    xSemaphoreGive(s_wake);
+}
+
+static bool hint_take(http_inbox_item_t *out)
+{
+    bool have;
+    xSemaphoreTake(s_hint_lock, portMAX_DELAY);
+    have = s_hint_n > 0;
+    if (have) {
+        *out = s_hints[0];
+        for (uint8_t i = 1; i < s_hint_n; i++) s_hints[i - 1] = s_hints[i];
+        s_hint_n--;
+    }
+    xSemaphoreGive(s_hint_lock);
+    return have;
+}
+
+static void hints_clear(void)
+{
+    xSemaphoreTake(s_hint_lock, portMAX_DELAY);
+    s_hint_n = 0;
+    xSemaphoreGive(s_hint_lock);
+}
+
+static void drain_hints(void)
+{
+    if (!s_hint_n) return;
+    if (sync_quiet_hold()) {   /* the morning's fetch_inbox collects them */
+        hints_clear();
+        return;
+    }
+    bool touched = false, changed = false;
+    http_inbox_item_t m;
+    while (hint_take(&m))
+        if (deliver_one(&m, &touched)) changed = true;
+    if (touched) {
+        contacts_sort();
+        contacts_cache_save();
+        if (s_ev.contacts_changed) s_ev.contacts_changed();
+    }
+    if (changed && s_ev.inbox_changed) s_ev.inbox_changed();
+}
+
 static void fetch_inbox(void)
 {
     static http_inbox_item_t items[UI_MAX_MESSAGES];
@@ -302,26 +396,7 @@ static void fetch_inbox(void)
                 changed = true;
             continue;
         }
-        if (storage_trash_has(items[i].id)) continue;   /* deleted locally,
-                                       server delete still pending */
-
-        storage_evict_if_needed();
-        char path[96];
-        snprintf(path, sizeof(path), INBOX_DIR "/%.*s.vmsg",
-                 UI_ID_LEN - 1, items[i].id);
-        if (!http_download_audio(items[i].id, path)) continue;
-
-        storage_inbox_meta_write(items[i].id, items[i].sender_name,
-                                 items[i].sender_color, items[i].when,
-                                 items[i].duration_s, false,
-                                 items[i].sender_id, items[i].ts,
-                                 items[i].reaction);
-        http_ack_message(items[i].id);
-        changed = true;
-        touched |= touch_quiet(items[i].sender_id);
-        if (s_ev.new_message) s_ev.new_message(items[i].sender_name);
-        ESP_LOGI(TAG, "downloaded %s from %s", items[i].id,
-                 items[i].sender_name);
+        if (deliver_one(&items[i], &touched)) changed = true;
     }
     if (touched) {          /* one resort/save/notify for the whole batch */
         contacts_sort();
@@ -401,6 +476,20 @@ static void sync_task(void *arg)
             if (tz_set && s_ev.inbox_changed) s_ev.inbox_changed();
         }
 
+        /* Incoming mail jumps the queue. Everything below holds the one
+         * TLS slot for as long as it takes - a contacts refresh, an outbox
+         * upload, a theme download - and a message the family is waiting
+         * on used to queue behind all of it. */
+        drain_hints();
+        bool did_inbox = false;
+        if (s_inbox_first) {      /* notify without usable metadata */
+            s_inbox_first = false;
+            if (!sync_quiet_hold()) {
+                fetch_inbox();
+                did_inbox = true;
+            }
+        }
+
         TickType_t now = xTaskGetTickCount();
         if (s_contacts_force || last_contacts == 0 ||
             (now - last_contacts) > pdMS_TO_TICKS(CONTACTS_INTERVAL_MS)) {
@@ -414,8 +503,10 @@ static void sync_task(void *arg)
         drain_reactions();
         drain_rseen();       /* before fetch_reactions, so a just-seen
                                 badge can't be resurrected by the fetch */
-        /* quiet hours: leave new mail on the server until morning */
-        if (!sync_quiet_hold()) fetch_inbox();
+        /* quiet hours: leave new mail on the server until morning. Still
+         * runs after a fast-path delivery above: this listing is also what
+         * reconciles server-side deletions. */
+        if (!did_inbox && !sync_quiet_hold()) fetch_inbox();
         fetch_reactions();
         theme_poll();   /* queued background download; serialized here so
                            only one TLS session runs at a time */
@@ -431,6 +522,7 @@ void sync_init(const sync_events_t *ev)
 {
     s_ev = *ev;
     s_wake = xSemaphoreCreateBinary();
+    s_hint_lock = xSemaphoreCreateMutex();
     contacts_cache_load();                 /* device is usable offline */
     themes_cache_load();
     reactions_cache_load();                /* badges survive reboots   */
@@ -438,6 +530,12 @@ void sync_init(const sync_events_t *ev)
 }
 
 void sync_kick(void) { xSemaphoreGive(s_wake); }
+
+void sync_inbox_kick(void)
+{
+    s_inbox_first = true;                /* jump the ladder once */
+    xSemaphoreGive(s_wake);
+}
 
 void sync_contacts_kick(void)
 {

@@ -14,6 +14,7 @@ messages still undelivered after REMIND_HOURS get one reminder email
 import asyncio
 import logging
 import os
+import time
 
 from . import db, notify
 
@@ -38,12 +39,8 @@ def cleanup_once(retention_days: int = RETENTION_DAYS,
             if not r["boxed"]:
                 c.execute("DELETE FROM messages WHERE id=?", (r["id"],))
                 purged += 1
-            try:
-                os.remove(db.audio_path(r["id"]))
-                if r["boxed"]:
-                    trimmed += 1
-            except FileNotFoundError:
-                pass
+            if db.drop_audio(r["id"]) and r["boxed"]:
+                trimmed += 1
         # row age-out: undelivered messages give up, and audio-less
         # device-recipient rows (kept above for the box's inbox) expire
         old = db.all_(c, """SELECT id FROM messages
@@ -51,10 +48,7 @@ def cleanup_once(retention_days: int = RETENTION_DAYS,
                       (f"-{retention_days} days",))
         for r in old:
             c.execute("DELETE FROM messages WHERE id=?", (r["id"],))
-            try:
-                os.remove(db.audio_path(r["id"]))
-            except FileNotFoundError:
-                pass
+            db.drop_audio(r["id"])
             purged += 1
         # seen reactions age out like messages; unseen ones wait for the
         # sender however long it takes (tiny rows, no audio attached)
@@ -62,9 +56,22 @@ def cleanup_once(retention_days: int = RETENTION_DAYS,
                      AND created < datetime('now', ?)""",
                   (f"-{retention_days} days",))
         ids = {r["id"] for r in db.all_(c, "SELECT id FROM messages")}
+    now = time.time()
     for fn in os.listdir(db.AUDIO_DIR):
-        if fn.endswith(".vmsg") and fn[:-5] not in ids:
-            os.remove(os.path.join(db.AUDIO_DIR, fn))
+        path = os.path.join(db.AUDIO_DIR, fn)
+        # a render killed mid-write leaves a .part behind; an hour is far
+        # longer than one takes, so anything older is certainly abandoned
+        if fn.endswith(".part"):
+            try:
+                if now - os.path.getmtime(path) > 3600:
+                    os.remove(path)
+                    swept += 1
+            except FileNotFoundError:
+                pass
+            continue
+        ext = next((e for e in db.AUDIO_EXTS if fn.endswith(e)), None)
+        if ext and fn[:-len(ext)] not in ids:
+            os.remove(path)
             swept += 1
     if purged or trimmed or swept:
         log.info("purged %d messages, trimmed %d delivered audio files, "
