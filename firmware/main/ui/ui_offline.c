@@ -4,6 +4,11 @@
  * connection), so this is a nag, not a wall:
  *   - it waits out short drops; the reconnect backoff recovers most of
  *     them well inside the grace period,
+ *   - it says nothing at all for the first minutes after a boot: coming
+ *     back from a reboot (an OTA especially) the box can spend a while
+ *     re-associating, and a card over a box that just updated itself
+ *     reads as "the update broke it" when the status-bar retry glyph
+ *     already says everything useful,
  *   - it only ever covers the home screen - never a recording, the
  *     inbox, the setup QR or the boot splash,
  *   - dismissing snoozes it for 5 minutes, and it comes back if WiFi is
@@ -14,8 +19,9 @@
  */
 #include "ui_internal.h"
 
-#define GRACE_MS   (60 * 1000)        /* offline this long before nagging */
-#define SNOOZE_MS  (5 * 60 * 1000)
+#define GRACE_MS      (60 * 1000)     /* offline this long before nagging */
+#define SNOOZE_MS     (5 * 60 * 1000)
+#define BOOT_QUIET_MS (3 * 60 * 1000) /* silence from boot, whatever else */
 
 static lv_obj_t *s_scrim;
 static uint32_t  s_down_since;        /* tick of the drop; 0 = not down   */
@@ -131,6 +137,9 @@ void ui_offline_eval(void)
     /* |1 keeps the stamp non-zero (0 is the "not down" marker); the 1 ms
      * it can add to the grace period is noise */
     if (!s_down_since) s_down_since = lv_tick_get() | 1;
+
+    /* lv_tick_get() counts from board_init, i.e. this boot: still settling */
+    if (lv_tick_get() < BOOT_QUIET_MS) return;
 
     if (!ui_screen_is(SCR_HOME)) { close_overlay(); return; }
     if (s_scrim) return;                                  /* already up  */

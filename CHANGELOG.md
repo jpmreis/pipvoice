@@ -12,6 +12,13 @@ write entries for humans.
 
 ## [Unreleased]
 
+### Fixed
+- The "No WiFi" card no longer appears in the first three minutes after
+  a boot: a box coming back from an OTA can spend a while
+  re-associating, and the card popping up over a box that just updated
+  itself read as the update having broken something. The status-bar
+  retry glyph still shows what's happening.
+
 ## [0.1.31] — 2026-08-22
 
 Device-side polish: what the box shows when the network is unhappy,
