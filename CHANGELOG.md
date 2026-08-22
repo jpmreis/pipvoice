@@ -12,13 +12,6 @@ write entries for humans.
 
 ## [Unreleased]
 
-### Fixed
-- Boot greeting: the wordmark is drawn once, fully, while the panel is
-  still dark before the animation rewinds and plays. At boot every glyph
-  is rasterized for the first time off cold flash, which is what the
-  first second of the animation was spending its frames on - the same
-  animation is smooth on wake, where those caches are hot.
-
 ## [0.1.33] — 2026-08-22
 
 ### Fixed
