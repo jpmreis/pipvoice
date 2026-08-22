@@ -18,6 +18,7 @@ void net_wifi_start(void);            /* connect using NVS creds            */
 void net_wifi_stop(void);             /* for provisioning mode              */
 bool net_wifi_is_connected(void);     /* online (probe passed)              */
 bool net_wifi_has_ip(void);           /* associated + DHCP done (any state) */
+int8_t net_wifi_rssi(void);           /* AP signal in dBm; 0 = unknown     */
 net_state_t net_wifi_state(void);     /* last reported state                */
 esp_netif_t *net_wifi_netif(void);    /* STA netif (for the setup relay)    */
 
@@ -27,6 +28,10 @@ esp_netif_t *net_wifi_netif(void);    /* STA netif (for the setup relay)    */
  * device back on the old network mid-setup. */
 void net_wifi_join_new(void);
 bool net_wifi_join_failed(void);      /* live-join gave up (bad password?)  */
+
+/* The saved-network list changed under us (setup page "Forget"): re-read
+ * it without touching the live connection. */
+void net_wifi_reload_nets(void);
 
 /* User activity while offline: skip the remaining backoff and retry now
  * (phone hotspots stop beaconing when idle and wake with their owner). */

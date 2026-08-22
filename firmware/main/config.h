@@ -47,6 +47,10 @@ bool config_is_hosted(void);
  * a box with zero networks auto-opens the WiFi-setup QR. */
 uint8_t config_wifi_list(wifi_cred_t *out, uint8_t cap);   /* returns count */
 void config_save_wifi(const char *ssid, const char *pass);
+/* Drop a saved network (setup page "Forget"). False if it wasn't there.
+ * Forgetting the active entry is allowed: the live link stays up, the
+ * box just won't come back to it. */
+bool config_forget_wifi(const char *ssid);
 void config_save_volume(uint8_t v);
 void config_save_brightness(uint8_t b);
 void config_save_theme(const char *name, bool black_text);

@@ -94,6 +94,9 @@ typedef struct {
     void (*reactions_seen)(const char *contact_id);       /* badge tapped */
     /* settings & provisioning */
     bool (*pin_check)(const char *pin);     /* true if PIN correct         */
+    /* AP signal in dBm for the status-bar strength icon, 0 = unknown;
+     * pulled from the UI's own status tick, not pushed */
+    int8_t (*wifi_rssi)(void);
     void (*volume_changed)(uint8_t pct);    /* 0..100                      */
     void (*brightness_changed)(uint8_t val);/* 0..255                      */
     /* background picked in settings; name "" = none. The app downloads the
@@ -121,12 +124,19 @@ void ui_set_contacts(const ui_contact_t *list, uint8_t count);
 void ui_set_inbox(const ui_message_t *list, uint8_t count);
 void ui_set_battery(uint8_t pct, bool charging, bool present);
 void ui_set_wifi(ui_wifi_state_t state);
+/* quiet hours: incoming mail is being held until until_hour (local).
+ * Shows the sleeping-inbox banner on home and in the inbox. */
+void ui_set_dnd(bool on, uint8_t until_hour);
 void ui_set_themes(const ui_theme_info_t *list, uint8_t count);
 
 /* Apply (or clear, px == NULL) the background on home/record/inbox.
  * px: 368x448 RGB565 little-endian, caller-owned, must stay alive while
  * set (it is referenced, not copied). */
 void ui_set_background(const uint16_t *px, const char *name, bool black_text);
+
+/* A background is being fetched (name) or the fetch ended (""): the
+ * picker rings that tile and spins on it until it lands. */
+void ui_theme_pending(const char *name);
 
 /* unseen reactions to sent messages, latest per contact (chips on the
  * home grid); refreshes the home screen */

@@ -68,7 +68,8 @@ main/
                     and on wake-from-off
   lv_mem_psram.c    LVGL heap in PSRAM
   ui/               LVGL 9 screens: home, record, inbox, playback,
-                    reactions, pinpad, settings, theme picker, wifi setup
+                    reactions, pinpad, settings, theme picker, wifi setup,
+                    offline nag (home-only overlay after 60 s without WiFi)
 ```
 
 Tasks: BSP LVGL task · audio (prio 6, static stack) · sync (4, core 0) ·

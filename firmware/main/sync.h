@@ -13,6 +13,17 @@ typedef struct {
     void (*reactions_changed)(void);             /* sender-side badges      */
 } sync_events_t;
 
+/* ---- quiet hours: incoming mail is held on the server overnight ----
+ * Between DND_START_H and DND_END_H local time the inbox fetch is
+ * skipped, so nothing lands (and nothing chimes) until the morning; the
+ * server keeps every row and its audio because this box never acks it.
+ * Sending, reactions and playback of what is already here are untouched.
+ * False until the clock is set - a box booting on a 1970 timestamp must
+ * not decide it is 3 a.m. and swallow the day's messages. */
+#define DND_START_H 21
+#define DND_END_H    8
+bool sync_dnd_active(void);
+
 void sync_init(const sync_events_t *ev);
 void sync_kick(void);            /* something to do (notify/outbox/wifi-up) */
 void sync_contacts_kick(void);   /* contact list changed server-side */

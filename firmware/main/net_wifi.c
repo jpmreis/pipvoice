@@ -35,6 +35,15 @@ net_state_t net_wifi_state(void) { return s_last; }
 bool net_wifi_join_failed(void)  { return s_pin_failed; }
 esp_netif_t *net_wifi_netif(void){ return s_sta_netif; }
 
+/* Signal of the AP we are on, for the home-screen strength icon. 0 is
+ * "don't know" (no association yet): a real reading is never 0 dBm. */
+int8_t net_wifi_rssi(void)
+{
+    wifi_ap_record_t ap;
+    if (!s_has_ip || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return 0;
+    return ap.rssi;
+}
+
 /* report a state to the app only on transitions (disconnect storms and
  * the portal re-probe loop would otherwise spam toasts/MQTT restarts) */
 static void report(net_state_t st)
@@ -185,6 +194,13 @@ void net_wifi_retry_now(void)
     if (!s_enabled || s_has_ip) return;
     s_backoff_ms = 1000;
     xTimerChangePeriod(s_retry_timer, 1, 0);   /* fires immediately */
+}
+
+void net_wifi_reload_nets(void)
+{
+    s_net_count = config_wifi_list(s_nets, CFG_MAX_WIFI);
+    s_net_idx = 0;          /* the old index may now point at another net */
+    s_net_fails = 0;
 }
 
 /* Setup saved a new network: connect to it now, alongside the running

@@ -356,6 +356,15 @@ static void fetch_inbox(void)
     if (changed && s_ev.inbox_changed) s_ev.inbox_changed();
 }
 
+bool sync_dnd_active(void)
+{
+    time_t now = time(NULL);
+    if (now < 1700000000) return false;    /* clock not set yet (SNTP) */
+    struct tm lt;
+    localtime_r(&now, &lt);
+    return lt.tm_hour >= DND_START_H || lt.tm_hour < DND_END_H;
+}
+
 static void sync_task(void *arg)
 {
     (void)arg;
@@ -386,7 +395,8 @@ static void sync_task(void *arg)
         drain_reactions();
         drain_rseen();       /* before fetch_reactions, so a just-seen
                                 badge can't be resurrected by the fetch */
-        fetch_inbox();
+        /* quiet hours: leave new mail on the server until morning */
+        if (!sync_dnd_active()) fetch_inbox();
         fetch_reactions();
         theme_poll();   /* queued background download; serialized here so
                            only one TLS session runs at a time */

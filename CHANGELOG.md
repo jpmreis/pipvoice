@@ -12,6 +12,41 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [0.1.31] — 2026-08-22
+
+Device-side polish: what the box shows when the network is unhappy,
+quiet hours at night, and a friendlier WiFi setup page.
+
+### Added
+- Device status bar shows WiFi *strength*: a drawn three-arc glyph lit
+  0-3 by the AP's RSSI (-55/-67/-78 dBm), replacing the fixed WiFi
+  symbol. The other states keep their symbols (retrying, portal
+  sign-in needed, offline).
+- Device "No WiFi" overlay: after 60 s offline the home screen shows a
+  card offering **Set up WiFi** (PIN-gated, opens the setup QR) or
+  **Not now** (snoozes 5 minutes, then returns if WiFi is still out).
+  It never covers a recording, the inbox, settings or the setup screen,
+  and captive portals keep their existing sign-in toast.
+- Device quiet hours: between 21:00 and 08:00 local time a box leaves
+  incoming messages on the server - nothing lands and nothing chimes
+  until morning, when the night's messages arrive together. Sending is
+  unaffected. A sleepy "Zzz" rides on the home inbox pill and a
+  quiet-hours card sits at the top of the inbox.
+- WiFi setup page: a **Scan again** button, and a list of saved
+  networks with **Forget** (names only - passwords are never sent to
+  the page).
+
+### Changed
+- Landing page: the Pip Cloud card no longer offers the waitlist signup
+  (the waitlist page itself stays), the hosting cards invite readers to
+  the source on GitHub, and the board price figure is gone.
+
+### Fixed
+- Background picker: the amber ring on the chosen background was hidden
+  behind its own thumbnail (children draw over a parent's border), and
+  the multi-second download had no feedback. The picked tile now keeps
+  the ring and spins until the image lands.
+
 ## [0.1.30] — 2026-08-21
 
 ### Added

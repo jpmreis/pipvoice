@@ -6,12 +6,58 @@
 static lv_obj_t *s_scr;
 static lv_obj_t *s_gear_lbl;
 static lv_obj_t *s_wifi_lbl;       /* mirrors the gear on the right */
+static lv_obj_t *s_wifi_waves;     /* strength glyph, shown when online */
+static lv_obj_t *s_wave[3];
+static lv_obj_t *s_wave_dot;
 static lv_obj_t *s_status_lbl;     /* battery, when present */
 static lv_obj_t *s_grid;           /* greeting + contact grid (scrolls) */
 static lv_obj_t *s_inbox_btn;
 static lv_obj_t *s_inbox_lbl;
 static lv_obj_t *s_badge;
 static lv_obj_t *s_badge_lbl;
+
+/* Strength glyph: the symbol font has one fixed WiFi fan, so the arcs
+ * are drawn. Three concentric 90-degree arcs plus the dot they radiate
+ * from, all sharing a center at (WAVE_CX, WAVE_CY) inside their box -
+ * each arc is positioned by its own radius, LVGL centers it in its own
+ * bounding box. */
+#define WAVE_BOX_W 46
+#define WAVE_BOX_H 30
+#define WAVE_CX    23
+#define WAVE_CY    26
+#define WAVE_R0     8
+#define WAVE_STEP   6
+#define WAVE_W      3
+#define WAVE_DOT    6
+
+static lv_obj_t *mk_wave(lv_obj_t *parent, int r)
+{
+    lv_obj_t *a = lv_arc_create(parent);
+    lv_obj_remove_style(a, NULL, LV_PART_KNOB);   /* decoration, not a dial */
+    lv_obj_clear_flag(a, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(a, 2 * r, 2 * r);
+    lv_obj_set_pos(a, WAVE_CX - r, WAVE_CY - r);
+    lv_arc_set_rotation(a, 0);
+    lv_arc_set_bg_angles(a, 225, 315);   /* 0 = 3 o'clock: this opens up */
+    lv_obj_set_style_arc_width(a, WAVE_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(a, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    return a;
+}
+
+/* dBm -> lit arcs at the usual breakpoints, with 3 dB of hysteresis
+ * against the level currently shown: a signal parked on a boundary
+ * would otherwise flip the glyph (and cost a panel flush) every tick.
+ * rssi == 0 is "no reading" and lands on 3 - an online box should not
+ * look like it is struggling just because the driver said nothing. */
+static uint8_t rssi_waves(int8_t rssi, uint8_t cur)
+{
+    static const int8_t th[3] = { -78, -67, -55 };   /* 1, 2, 3 arcs */
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < 3; i++)
+        if (rssi >= th[i] + (cur > i ? -3 : 0)) n = i + 1;
+    return n;
+}
 
 /* ------------- events ------------- */
 static void contact_clicked(lv_event_t *e)
@@ -33,6 +79,7 @@ static void inbox_clicked(lv_event_t *e)
 static void settings_clicked(lv_event_t *e)
 {
     LV_UNUSED(e);
+    scr_pinpad_arm(NULL);            /* the gear path unlocks Settings */
     nav_to(SCR_PINPAD, LV_SCR_LOAD_ANIM_MOVE_BOTTOM);
 }
 
@@ -82,6 +129,22 @@ lv_obj_t *scr_home_create(void)
     lv_obj_set_style_text_font(s_wifi_lbl, FONT_TITLE, 0);
     lv_obj_set_style_text_color(s_wifi_lbl, COL_TEXT_DIM, 0);
     lv_obj_center(s_wifi_lbl);
+
+    /* online: the drawn arcs take the label's place (one or the other is
+     * hidden, so they can share the box) */
+    s_wifi_waves = lv_obj_create(wifi_box);
+    lv_obj_remove_style_all(s_wifi_waves);
+    lv_obj_set_size(s_wifi_waves, WAVE_BOX_W, WAVE_BOX_H);
+    lv_obj_clear_flag(s_wifi_waves, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_center(s_wifi_waves);
+    for (int i = 0; i < 3; i++)
+        s_wave[i] = mk_wave(s_wifi_waves, WAVE_R0 + i * WAVE_STEP);
+    s_wave_dot = lv_obj_create(s_wifi_waves);
+    lv_obj_remove_style_all(s_wave_dot);
+    lv_obj_set_size(s_wave_dot, WAVE_DOT, WAVE_DOT);
+    lv_obj_set_pos(s_wave_dot, WAVE_CX - WAVE_DOT / 2, WAVE_CY - WAVE_DOT / 2);
+    lv_obj_set_style_radius(s_wave_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(s_wave_dot, LV_OPA_COVER, 0);
 
     s_status_lbl = lv_label_create(bar);
     lv_obj_set_style_text_font(s_status_lbl, FONT_SMALL, 0);
@@ -212,22 +275,62 @@ static void rebuild_contacts(void)
     }
 }
 
+/* what the status bar currently shows: it is re-evaluated every few
+ * seconds and re-rendering identical content still costs a panel flush */
+static ui_wifi_state_t s_shown_wifi = (ui_wifi_state_t)-1;
+static uint8_t         s_shown_waves;
+static char            s_shown_bat[16];
+static bool            s_status_dirty = true;   /* colors changed (theme) */
+
 /* status bar only: wifi/battery tick every few seconds - they must NOT
  * rebuild the contact grid (that reset an in-progress scroll) */
 void scr_home_update_status(void)
 {
     if (!s_scr) return;
-    lv_label_set_text(s_wifi_lbl,
-        (g_ui.wifi == UI_WIFI_ONLINE)     ? LV_SYMBOL_WIFI :
-        (g_ui.wifi == UI_WIFI_PORTAL)     ? LV_SYMBOL_WARNING :
-        (g_ui.wifi == UI_WIFI_CONNECTING) ? LV_SYMBOL_REFRESH : LV_SYMBOL_CLOSE);
+
+    bool online = (g_ui.wifi == UI_WIFI_ONLINE);
+    uint8_t waves = online
+        ? rssi_waves(g_ui.cb.wifi_rssi ? g_ui.cb.wifi_rssi() : 0,
+                     s_shown_waves) : 0;
+
+    if (s_status_dirty || g_ui.wifi != s_shown_wifi || waves != s_shown_waves) {
+        s_shown_wifi  = g_ui.wifi;
+        s_shown_waves = waves;
+        if (online) {
+            lv_obj_add_flag(s_wifi_lbl, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(s_wifi_waves, LV_OBJ_FLAG_HIDDEN);
+            lv_color_t col = ui_fg_color(true);
+            lv_opa_t   lit = ui_fg_opa(true);
+            lv_obj_set_style_bg_color(s_wave_dot, col, 0);
+            lv_obj_set_style_bg_opa(s_wave_dot, lit, 0);
+            for (int i = 0; i < 3; i++) {
+                lv_obj_set_style_arc_color(s_wave[i], col, LV_PART_MAIN);
+                /* unlit arcs stay faintly visible: the glyph keeps its
+                 * shape, so weak signal reads as weak, not as broken */
+                lv_obj_set_style_arc_opa(s_wave[i],
+                                         i < waves ? lit : lit / 4,
+                                         LV_PART_MAIN);
+            }
+        } else {
+            lv_obj_add_flag(s_wifi_waves, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(s_wifi_lbl, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(s_wifi_lbl,
+                (g_ui.wifi == UI_WIFI_PORTAL)     ? LV_SYMBOL_WARNING :
+                (g_ui.wifi == UI_WIFI_CONNECTING) ? LV_SYMBOL_REFRESH
+                                                  : LV_SYMBOL_CLOSE);
+        }
+    }
+
+    char bat[sizeof(s_shown_bat)] = "";
     if (g_ui.battery_present)
-        lv_label_set_text_fmt(s_status_lbl, "%s %u%%",
-                              g_ui.charging ? LV_SYMBOL_CHARGE
-                                            : LV_SYMBOL_BATTERY_3,
-                              g_ui.battery_pct);
-    else
-        lv_label_set_text(s_status_lbl, "");
+        snprintf(bat, sizeof(bat), "%s %u%%",
+                 g_ui.charging ? LV_SYMBOL_CHARGE : LV_SYMBOL_BATTERY_3,
+                 g_ui.battery_pct);
+    if (s_status_dirty || strcmp(bat, s_shown_bat)) {
+        strlcpy(s_shown_bat, bat, sizeof(s_shown_bat));
+        lv_label_set_text(s_status_lbl, bat);
+    }
+    s_status_dirty = false;
 }
 
 /* inbox pill + badge only: message arrivals don't touch the grid either */
@@ -235,13 +338,15 @@ void scr_home_update_inbox(void)
 {
     if (!s_scr) return;
     lv_obj_set_style_bg_opa(s_inbox_btn, UI_SURFACE_OPA, 0);
+    /* quiet hours ride along on the pill: same row, a sleepy tail */
+    const char *zzz = g_ui.dnd ? "   Zzz" : "";
     if (g_ui.unheard_count > 0) {
-        lv_label_set_text_fmt(s_inbox_lbl, LV_SYMBOL_BELL "  Inbox");
+        lv_label_set_text_fmt(s_inbox_lbl, LV_SYMBOL_BELL "  Inbox%s", zzz);
         lv_label_set_text_fmt(s_badge_lbl, "%u", g_ui.unheard_count);
         lv_obj_clear_flag(s_badge, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_color(s_inbox_btn, COL_SURFACE2, 0);
     } else {
-        lv_label_set_text(s_inbox_lbl, LV_SYMBOL_ENVELOPE "  Inbox");
+        lv_label_set_text_fmt(s_inbox_lbl, LV_SYMBOL_ENVELOPE "  Inbox%s", zzz);
         lv_obj_add_flag(s_badge, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_color(s_inbox_btn, COL_SURFACE, 0);
     }
@@ -263,5 +368,6 @@ void scr_home_apply_theme(void)
     ui_fg_label(s_gear_lbl, true);
     ui_fg_label(s_wifi_lbl, true);
     ui_fg_label(s_status_lbl, true);
+    s_status_dirty = true;           /* arc colors are set on next update */
     scr_home_refresh();              /* rebuilds greeting + contact names */
 }

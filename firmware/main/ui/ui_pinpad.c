@@ -10,6 +10,10 @@ static lv_obj_t *s_dots[PIN_LEN];
 static lv_obj_t *s_msg;
 static char      s_entry[PIN_LEN + 1];
 static uint8_t   s_pos;
+/* what a correct PIN unlocks; NULL = Settings, the gear/swipe path */
+static void    (*s_on_ok)(void);
+
+void scr_pinpad_arm(void (*on_ok)(void)) { s_on_ok = on_ok; }
 
 static void draw_dots(void)
 {
@@ -30,7 +34,10 @@ static void submit(void)
 {
     bool ok = g_ui.cb.pin_check ? g_ui.cb.pin_check(s_entry) : false;
     if (ok) {
-        nav_to(SCR_SETTINGS, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+        void (*go)(void) = s_on_ok;   /* one-shot: clear before acting */
+        s_on_ok = NULL;
+        if (go) go();
+        else    nav_to(SCR_SETTINGS, LV_SCR_LOAD_ANIM_MOVE_LEFT);
     } else {
         lv_label_set_text(s_msg, "Wrong PIN - try again");
         s_pos = 0;
@@ -45,6 +52,7 @@ static void gesture_cb(lv_event_t *e)
     /* entered by sliding up from home: swipe up dismisses it again */
     if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
         lv_indev_wait_release(lv_indev_active());
+        s_on_ok = NULL;
         nav_to(SCR_HOME, LV_SCR_LOAD_ANIM_MOVE_TOP);
     }
 }
@@ -56,6 +64,7 @@ static void key_clicked(lv_event_t *e)
     if (v == -1) {                       /* backspace */
         if (s_pos) { s_pos--; s_entry[s_pos] = 0; }
     } else if (v == -2) {                /* cancel */
+        s_on_ok = NULL;
         nav_to(SCR_HOME, LV_SCR_LOAD_ANIM_MOVE_TOP);
         return;
     } else if (s_pos < PIN_LEN) {

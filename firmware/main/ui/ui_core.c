@@ -5,7 +5,23 @@
 
 ui_state_t g_ui;
 
-static lv_obj_t *s_screens[SCR_COUNT];
+static lv_obj_t      *s_screens[SCR_COUNT];
+static ui_screen_id_t s_cur = SCR_HOME;
+
+/* lv_screen_active() still reports the old screen while a load animation
+ * runs, so navigation decisions use the target instead */
+bool ui_screen_is(ui_screen_id_t id) { return s_cur == id; }
+
+/* status bar (wifi strength, battery) + the offline nag's grace/snooze
+ * timers; everything else is event-driven */
+#define UI_TICK_MS 5000
+
+static void ui_tick_cb(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+    scr_home_update_status();
+    ui_offline_eval();
+}
 
 void nav_to(ui_screen_id_t id, lv_screen_load_anim_t anim)
 {
@@ -20,7 +36,10 @@ void nav_to(ui_screen_id_t id, lv_screen_load_anim_t anim)
         case SCR_THEME_PICKER: scr_theme_picker_refresh(); break;
         default: break;
     }
+    s_cur = id;
+    if (id != SCR_HOME) ui_offline_hide();   /* the nag is home-only */
     lv_screen_load_anim(s_screens[id], anim, 180, 0, false);
+    if (id == SCR_HOME) ui_offline_eval();   /* still offline? nag again */
 }
 
 void ui_init(const ui_callbacks_t *cbs)
@@ -41,6 +60,7 @@ void ui_init(const ui_callbacks_t *cbs)
 
     scr_home_refresh();
     lv_screen_load(s_screens[SCR_HOME]);
+    lv_timer_create(ui_tick_cb, UI_TICK_MS, NULL);
 }
 
 /* ---------------- physical-button navigation ---------------- */
@@ -85,6 +105,8 @@ void ui_splash_wake(void)
      * even for ANIM_NONE. lv_screen_load() is time-0 -> switches now. */
     if (nav_locked_out()) return;
     scr_splash_show();
+    s_cur = SCR_SPLASH;
+    ui_offline_hide();
     lv_screen_load(s_screens[SCR_SPLASH]);
     lv_refr_now(NULL);
 }
@@ -128,6 +150,16 @@ void ui_set_wifi(ui_wifi_state_t state)
 {
     g_ui.wifi = state;
     scr_home_update_status();
+    ui_offline_eval();
+}
+
+void ui_set_dnd(bool on, uint8_t until_hour)
+{
+    if (g_ui.dnd == on && g_ui.dnd_until_h == until_hour) return;
+    g_ui.dnd = on;
+    g_ui.dnd_until_h = until_hour;
+    scr_home_update_inbox();      /* pill only: don't reset a grid scroll */
+    scr_inbox_refresh();
 }
 
 void ui_set_themes(const ui_theme_info_t *list, uint8_t count)
@@ -135,6 +167,12 @@ void ui_set_themes(const ui_theme_info_t *list, uint8_t count)
     if (count > UI_MAX_THEMES) count = UI_MAX_THEMES;
     memcpy(g_ui.themes, list, count * sizeof(ui_theme_info_t));
     g_ui.theme_count = count;
+    scr_theme_picker_refresh();
+}
+
+void ui_theme_pending(const char *name)
+{
+    strlcpy(g_ui.theme_pending, name ? name : "", sizeof(g_ui.theme_pending));
     scr_theme_picker_refresh();
 }
 

@@ -79,6 +79,7 @@ void theme_poll(void)
         config_save_theme(s_pending_name, s_pending_black);
         if (board_lock(500)) {
             ui_set_background(s_px, s_pending_name, s_pending_black);
+            ui_theme_pending("");
             board_unlock();
         }
         ESP_LOGI(TAG, "background '%s' applied", s_pending_name);
@@ -89,6 +90,7 @@ void theme_poll(void)
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         if (board_lock(500)) {
+            ui_theme_pending("");       /* ring falls back to the active */
             ui_flash_error("Background download failed");
             board_unlock();
         }
@@ -195,6 +197,7 @@ bool theme_select(const char *name, bool black_text)
     strlcpy(s_pending_name, name, sizeof(s_pending_name));
     s_pending_black = black_text;
     s_busy = true;
+    ui_theme_pending(name);        /* picker: ring + spinner on that tile */
     sync_kick();                              /* sync task runs theme_poll */
     return true;
 }

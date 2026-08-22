@@ -164,6 +164,34 @@ void config_save_wifi(const char *ssid, const char *pass)
     }
 }
 
+bool config_forget_wifi(const char *ssid)
+{
+    int at = wifi_find(ssid);
+    if (at < 0) return false;
+    for (uint8_t i = (uint8_t)at; i + 1 < s_wifi_count; i++)
+        s_wifi[i] = s_wifi[i + 1];
+    memset(&s_wifi[--s_wifi_count], 0, sizeof(s_wifi[0]));
+
+    /* the active network mirrors entry 0 (empty when nothing is left:
+     * that is the "auto-open the setup QR" state on the next boot) */
+    strlcpy(g_cfg.wifi_ssid, s_wifi_count ? s_wifi[0].ssid : "",
+            sizeof(g_cfg.wifi_ssid));
+    strlcpy(g_cfg.wifi_pass, s_wifi_count ? s_wifi[0].pass : "",
+            sizeof(g_cfg.wifi_pass));
+
+    nvs_handle_t h;
+    if (nvs_open("pipcfg", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, "wifi_ssid", g_cfg.wifi_ssid);
+        nvs_set_str(h, "wifi_pass", g_cfg.wifi_pass);
+        if (s_wifi_count) wifi_list_write(h);
+        else              nvs_erase_key(h, "wifi_nets");
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "forgot network '%s', %u left", ssid, s_wifi_count);
+    return true;
+}
+
 void config_save_volume(uint8_t v)     { g_cfg.speaker_volume = v; save_u32("volume", v); }
 void config_save_brightness(uint8_t b) { g_cfg.brightness = b;     save_u32("brightness", b); }
 

@@ -37,10 +37,13 @@ typedef struct {
     bool            charging;
     bool            battery_present;
     ui_wifi_state_t wifi;
+    bool            dnd;              /* quiet hours: mail held on server */
+    uint8_t         dnd_until_h;      /* local hour it resumes            */
 
     ui_theme_info_t themes[UI_MAX_THEMES];   /* picker options from server */
     uint8_t         theme_count;
     char            theme_name[UI_NAME_LEN]; /* active theme; "" = none    */
+    char            theme_pending[UI_NAME_LEN]; /* downloading now; "" none */
     bool            theme_active;
     bool            theme_black_text;
 
@@ -68,6 +71,9 @@ typedef enum {
 } ui_screen_id_t;
 
 void nav_to(ui_screen_id_t id, lv_screen_load_anim_t anim);
+/* which screen nav_to last selected (reliable mid-animation, unlike
+ * lv_screen_active()) */
+bool ui_screen_is(ui_screen_id_t id);
 
 /* Each screen module: build once at init, refresh on show. */
 lv_obj_t *scr_home_create(void);     void scr_home_refresh(void);
@@ -76,6 +82,10 @@ lv_obj_t *scr_record_create(void);   void scr_record_show(void);
 lv_obj_t *scr_inbox_create(void);    void scr_inbox_refresh(void);
 lv_obj_t *scr_playback_create(void); void scr_playback_show(const ui_message_t *msg);
 lv_obj_t *scr_pinpad_create(void);   void scr_pinpad_reset(void);
+/* Run on_ok() instead of opening Settings after the next correct PIN.
+ * Arm it just before nav_to(SCR_PINPAD); the pad clears it when it is
+ * left, whether the PIN was right or the user backed out. */
+void scr_pinpad_arm(void (*on_ok)(void));
 lv_obj_t *scr_settings_create(void);
 lv_obj_t *scr_theme_picker_create(void); void scr_theme_picker_refresh(void);
 
@@ -107,6 +117,13 @@ void ui_react_mark_seen(const char *contact_id);
 void scr_playback_progress(uint16_t pos_s, uint16_t total_s);
 void scr_playback_finished(void);
 
+/* ---------- offline nag (ui_offline.c) ---------- */
+/* re-decide whether the "No WiFi" overlay belongs on screen (wifi state,
+ * grace period, snooze, home-screen-only) */
+void ui_offline_eval(void);
+void ui_offline_hide(void);          /* leaving home, or back online */
+void ui_offline_defer(void);         /* restart the quiet period      */
+
 /* ---------- small helpers (ui_theme.c) ---------- */
 lv_obj_t *mk_screen(void);                                  /* black bg     */
 lv_obj_t *mk_header(lv_obj_t *parent, const char *title,
@@ -117,6 +134,9 @@ const lv_image_dsc_t *ui_bg_image(void);
 /* color a label that sits directly on the background: theme fg when a
  * theme is active (dim = translucent), else COL_TEXT / COL_TEXT_DIM */
 void ui_fg_label(lv_obj_t *label, bool dim);
+/* the same rules, for drawn art (no text style to inherit them) */
+lv_color_t ui_fg_color(bool dim);
+lv_opa_t   ui_fg_opa(bool dim);
 /* recolor a mk_header bar's back arrow + title for the active theme */
 void ui_fg_header(lv_obj_t *bar);
 /* faded surfaces: rows/buttons keep contrast but let the bg peek through */

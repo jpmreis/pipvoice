@@ -3,7 +3,8 @@
  * tiles, amber ring on the active choice, "None" first. Thumbnails come
  * from the app via cb.theme_thumb (PSRAM, cached in LittleFS by the sync
  * task); a theme whose thumb hasn't downloaded yet falls back to its
- * label on a plain surface. */
+ * label on a plain surface. The tile being downloaded (g_ui.theme_pending,
+ * pushed by theme.c) wears the ring and a spinner until it lands. */
 #include "ui_internal.h"
 #include <string.h>
 
@@ -25,40 +26,46 @@ static void gesture_cb(lv_event_t *e)
     }
 }
 
-/* move the ring immediately - the definitive refresh happens when the app
- * applies the background, but that's a multi-second download away and the
- * picker felt unresponsive without instant feedback */
-static void ring_tile(lv_obj_t *btn)
-{
-    uint32_t n = lv_obj_get_child_count(s_grid);
-    for (uint32_t i = 0; i < n; i++) {
-        lv_obj_t *c = lv_obj_get_child(s_grid, (int32_t)i);
-        lv_obj_set_style_border_width(c, c == btn ? 3 : 0, 0);
-        if (c == btn) lv_obj_set_style_border_color(c, COL_ACCENT, 0);
-    }
-}
-
 static void tile_clicked(lv_event_t *e)
 {
     /* user_data: 0 = "None", i+1 = g_ui.themes[i] */
     uintptr_t idx = (uintptr_t)lv_event_get_user_data(e);
-    lv_obj_t *btn = lv_event_get_current_target(e);
     if (!g_ui.cb.theme_selected) return;
     if (idx == 0) {
         if (!g_ui.theme_active) return;            /* already none */
-        if (g_ui.cb.theme_selected("", false))
-            ring_tile(btn);
+        g_ui.cb.theme_selected("", false);         /* applies right here */
     } else if (idx - 1 < g_ui.theme_count) {
         const ui_theme_info_t *t = &g_ui.themes[idx - 1];
         if (g_ui.theme_active && !strcmp(t->name, g_ui.theme_name))
             return;                                /* already active */
-        /* toast only when the pick was accepted - a busy download
-         * swallows the pick, and toasting then would lie */
-        if (g_ui.cb.theme_selected(t->name, t->black_text)) {
-            ring_tile(btn);
-            ui_toast("Fetching background...", COL_ACCENT);
-        }
+        /* an accepted pick comes straight back as ui_theme_pending(),
+         * which re-renders the grid with the ring + spinner on this
+         * tile; a pick refused by a busy download changes nothing */
+        if (!g_ui.cb.theme_selected(t->name, t->black_text))
+            ui_toast("One background at a time...", COL_ACCENT);
     }
+    /* both accepted paths refresh through the app; nothing to do here */
+}
+
+/* dimmed veil + spinner while the full-size image downloads (seconds
+ * over TLS, and the picker looked frozen without it) */
+static void mk_busy(lv_obj_t *tile)
+{
+    lv_obj_t *veil = lv_obj_create(tile);
+    lv_obj_remove_style_all(veil);
+    lv_obj_set_size(veil, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(veil, COL_BG, 0);
+    lv_obj_set_style_bg_opa(veil, LV_OPA_60, 0);
+    lv_obj_clear_flag(veil, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *sp = lv_spinner_create(veil);
+    lv_obj_remove_style(sp, NULL, LV_PART_KNOB);
+    lv_obj_set_size(sp, 40, 40);
+    lv_obj_center(sp);
+    lv_obj_set_style_arc_width(sp, 4, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(sp, 4, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(sp, COL_SURFACE2, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(sp, COL_ACCENT, LV_PART_INDICATOR);
 }
 
 static lv_obj_t *mk_tile(uintptr_t idx, bool selected)
@@ -73,6 +80,9 @@ static lv_obj_t *mk_tile(uintptr_t idx, bool selected)
     if (selected) {
         lv_obj_set_style_border_width(btn, 3, 0);
         lv_obj_set_style_border_color(btn, COL_ACCENT, 0);
+        /* children (the thumbnail fills the tile) draw over the parent's
+         * border - post keeps the ring on top, where it can be seen */
+        lv_obj_set_style_border_post(btn, true, 0);
     }
     lv_obj_add_event_cb(btn, tile_clicked, LV_EVENT_CLICKED, (void *)idx);
     return btn;
@@ -84,16 +94,22 @@ static void refresh_now(void *arg)
     if (!s_grid) return;
     lv_obj_clean(s_grid);
 
-    lv_obj_t *none = mk_tile(0, !g_ui.theme_active);
+    lv_obj_t *none = mk_tile(0, !g_ui.theme_active &&
+                                !g_ui.theme_pending[0]);
     lv_obj_t *nl = lv_label_create(none);
     lv_label_set_text(nl, "None");
     lv_obj_set_style_text_font(nl, FONT_SMALL, 0);
     lv_obj_set_style_text_color(nl, COL_TEXT_DIM, 0);
     lv_obj_center(nl);
 
+    bool waiting = g_ui.theme_pending[0] != '\0';
     for (uint8_t i = 0; i < g_ui.theme_count; i++) {
         const ui_theme_info_t *t = &g_ui.themes[i];
-        bool sel = g_ui.theme_active && !strcmp(t->name, g_ui.theme_name);
+        bool busy = waiting && !strcmp(t->name, g_ui.theme_pending);
+        /* while a pick is downloading the ring follows the pick, not the
+         * background still on screen */
+        bool sel = busy || (!waiting && g_ui.theme_active &&
+                            !strcmp(t->name, g_ui.theme_name));
         lv_obj_t *btn = mk_tile((uintptr_t)i + 1, sel);
 
         const uint16_t *px = g_ui.cb.theme_thumb
@@ -117,6 +133,7 @@ static void refresh_now(void *arg)
             lv_obj_set_style_text_color(l, COL_TEXT_DIM, 0);
             lv_obj_center(l);
         }
+        if (busy) mk_busy(btn);
     }
 }
 

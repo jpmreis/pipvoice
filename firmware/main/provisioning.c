@@ -204,6 +204,19 @@ static void url_decode(char *s)
     *o = 0;
 }
 
+/* minimal JSON string escape: SSIDs are user-named and may hold quotes
+ * or backslashes, which would break the scan/known payloads */
+static void json_escape(char *out, size_t cap, const char *in)
+{
+    size_t o = 0;
+    for (; *in && o + 2 < cap; in++) {
+        if (*in == '"' || *in == '\\') out[o++] = '\\';
+        else if ((unsigned char)*in < 0x20) continue;   /* control: drop */
+        out[o++] = *in;
+    }
+    out[o] = 0;
+}
+
 /* ---------------- HTTP handlers ---------------- */
 static esp_err_t root_get(httpd_req_t *req)
 {
@@ -222,18 +235,64 @@ static esp_err_t scan_get(httpd_req_t *req)
     static wifi_ap_record_t recs[12];
     esp_wifi_scan_get_ap_records(&n, recs);
 
-    /* n = name, o = open network (no password field on the page) */
-    char json[768] = "[";
+    /* n = name, o = open network (no password field on the page).
+     * static: this runs on the httpd task's modest stack, and handlers
+     * are serialized. The margin stops an entry being cut in half - a
+     * dropped network is fine, half a JSON object is not. */
+    static char json[1024];
+    strlcpy(json, "[", sizeof(json));
     size_t off = 1;
-    for (uint16_t i = 0; i < n && off < sizeof(json) - 56; i++) {
+    for (uint16_t i = 0; i < n && off + 80 < sizeof(json); i++) {
+        char esc[33 * 2];
+        json_escape(esc, sizeof(esc), (const char *)recs[i].ssid);
         off += snprintf(json + off, sizeof(json) - off,
                         "%s{\"n\":\"%s\",\"o\":%d}", i ? "," : "",
-                        (const char *)recs[i].ssid,
-                        recs[i].authmode == WIFI_AUTH_OPEN ? 1 : 0);
+                        esc, recs[i].authmode == WIFI_AUTH_OPEN ? 1 : 0);
     }
     strlcat(json, "]", sizeof(json));
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, json);
+}
+
+/* saved networks, names only - never the passwords */
+static esp_err_t known_get(httpd_req_t *req)
+{
+    idle_timer_touch();
+    wifi_cred_t nets[CFG_MAX_WIFI];
+    uint8_t n = config_wifi_list(nets, CFG_MAX_WIFI);
+
+    /* n = name, a = the one the box uses first (entry 0) */
+    static char json[1024];
+    strlcpy(json, "[", sizeof(json));
+    size_t off = 1;
+    for (uint8_t i = 0; i < n && off + 80 < sizeof(json); i++) {
+        char esc[33 * 2];
+        json_escape(esc, sizeof(esc), nets[i].ssid);
+        off += snprintf(json + off, sizeof(json) - off,
+                        "%s{\"n\":\"%s\",\"a\":%d}", i ? "," : "",
+                        esc, i == 0 ? 1 : 0);
+    }
+    strlcat(json, "]", sizeof(json));
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, json);
+}
+
+static esp_err_t forget_post(httpd_req_t *req)
+{
+    idle_timer_touch();
+    char body[160] = {0};       /* "ssid=" + a fully %XX-escaped SSID */
+    int len = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (len <= 0) return httpd_resp_send_500(req);
+
+    char ssid[33] = {0};
+    httpd_query_key_value(body, "ssid", ssid, sizeof(ssid));
+    url_decode(ssid);
+    if (!ssid[0]) return httpd_resp_send_500(req);
+
+    bool gone = config_forget_wifi(ssid);
+    if (gone) net_wifi_reload_nets();   /* the retry list changed */
+    ESP_LOGI(TAG, "forget '%s': %s", ssid, gone ? "done" : "not saved");
+    return httpd_resp_sendstr(req, gone ? "OK" : "MISS");
 }
 
 static esp_err_t save_post(httpd_req_t *req)
@@ -354,10 +413,14 @@ bool provisioning_start(char *ap_ssid, char *ap_pass)
     static const httpd_uri_t u_scan   = { .uri = "/scan",   .method = HTTP_GET,  .handler = scan_get };
     static const httpd_uri_t u_save   = { .uri = "/save",   .method = HTTP_POST, .handler = save_post };
     static const httpd_uri_t u_status = { .uri = "/status", .method = HTTP_GET,  .handler = status_get };
+    static const httpd_uri_t u_known  = { .uri = "/known",  .method = HTTP_GET,  .handler = known_get };
+    static const httpd_uri_t u_forget = { .uri = "/forget", .method = HTTP_POST, .handler = forget_post };
     static const httpd_uri_t u_any    = { .uri = "/*",      .method = HTTP_GET,  .handler = root_get };
     httpd_register_uri_handler(s_httpd, &u_scan);
     httpd_register_uri_handler(s_httpd, &u_save);
     httpd_register_uri_handler(s_httpd, &u_status);
+    httpd_register_uri_handler(s_httpd, &u_known);
+    httpd_register_uri_handler(s_httpd, &u_forget);
     httpd_register_uri_handler(s_httpd, &u_any);   /* captive: everything -> portal */
 
     const esp_timer_create_args_t targs = {

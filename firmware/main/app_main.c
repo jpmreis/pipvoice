@@ -149,6 +149,8 @@ static void cb_reactions_seen(const char *contact_id)
 
 static bool cb_pin(const char *pin) { return config_check_pin(pin); }
 
+static int8_t cb_wifi_rssi(void) { return net_wifi_rssi(); }
+
 static void cb_volume(uint8_t v)
 {
     config_save_volume(v);
@@ -253,6 +255,18 @@ static void ev_reactions_changed(void)
 static void ev_battery(uint8_t pct, bool charging, bool present)
 {
     UI_LOCKED(ui_set_battery(pct, charging, present));
+
+    /* the battery poll doubles as the 30 s housekeeping tick: keep the
+     * quiet-hours banner honest, and fetch the held night's messages the
+     * moment the window closes (the 15 min poll would dawdle) */
+    static bool dnd_known, dnd_was;
+    bool dnd = sync_dnd_active();
+    if (!dnd_known || dnd != dnd_was) {
+        dnd_known = true;
+        dnd_was = dnd;
+        UI_LOCKED(ui_set_dnd(dnd, DND_END_H));
+        if (!dnd) sync_kick();
+    }
 }
 
 static void ev_wifi(net_state_t st)
@@ -317,8 +331,12 @@ static void ev_mqtt_notify(const char *payload)
         if (cJSON_IsString(fr) && cJSON_IsString(re)) {
             const char *name = cJSON_IsString(fn) ? fn->valuestring
                                                   : fr->valuestring;
-            audio_play_chime(CHIME_RECEIVED);
-            UI_LOCKED(ui_notify_reaction(name, re->valuestring));
+            /* quiet hours cover reactions too - the badge still lands
+             * below, it just arrives without a chime in the dark */
+            if (!sync_dnd_active()) {
+                audio_play_chime(CHIME_RECEIVED);
+                UI_LOCKED(ui_notify_reaction(name, re->valuestring));
+            }
             /* fires reactions_changed -> home badge (MQTT task: file
              * I/O is fine here, this is not a UI callback) */
             sync_reaction_add(fr->valuestring, name, re->valuestring);
@@ -380,6 +398,7 @@ void app_main(void)
         .react = cb_react,
         .reactions_seen = cb_reactions_seen,
         .pin_check = cb_pin,
+        .wifi_rssi = cb_wifi_rssi,
         .volume_changed = cb_volume,
         .brightness_changed = cb_brightness,
         .theme_selected = cb_theme,

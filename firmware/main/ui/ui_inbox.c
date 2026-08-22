@@ -63,13 +63,43 @@ lv_obj_t *scr_inbox_create(void)
     return s_scr;
 }
 
+/* quiet-hours card: first row of the list, so it scrolls with the
+ * messages instead of eating a fixed strip of a small screen */
+static void mk_dnd_banner(void)
+{
+    lv_obj_t *card = lv_obj_create(s_list);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(card, COL_SURFACE2, 0);
+    lv_obj_set_style_bg_opa(card, UI_SURFACE_OPA, 0);
+    lv_obj_set_style_radius(card, 14, 0);
+    lv_obj_set_style_pad_all(card, 12, 0);
+    lv_obj_set_style_pad_row(card, 4, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *t = lv_label_create(card);
+    lv_label_set_text(t, LV_SYMBOL_BELL "  Quiet hours - Zzz");
+    lv_obj_set_style_text_font(t, FONT_BODY, 0);
+    lv_obj_set_style_text_color(t, COL_ACCENT, 0);
+
+    lv_obj_t *b = lv_label_create(card);
+    lv_label_set_text_fmt(b, "New messages are waiting for you\n"
+                             "and arrive at %u:00.", g_ui.dnd_until_h);
+    lv_obj_set_style_text_font(b, FONT_SMALL, 0);
+    lv_obj_set_style_text_color(b, COL_TEXT_DIM, 0);
+}
+
 void scr_inbox_refresh(void)
 {
     if (!s_scr) return;
     lv_obj_clean(s_list);
+    if (g_ui.dnd) mk_dnd_banner();
 
     if (g_ui.inbox_count == 0) {
-        lv_obj_clear_flag(s_empty_lbl, LV_OBJ_FLAG_HIDDEN);
+        /* the banner already says something: don't stack two messages */
+        if (g_ui.dnd) lv_obj_add_flag(s_empty_lbl, LV_OBJ_FLAG_HIDDEN);
+        else          lv_obj_clear_flag(s_empty_lbl, LV_OBJ_FLAG_HIDDEN);
         return;
     }
     lv_obj_add_flag(s_empty_lbl, LV_OBJ_FLAG_HIDDEN);

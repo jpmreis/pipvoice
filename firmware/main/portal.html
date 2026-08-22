@@ -12,6 +12,15 @@ border:1px solid #24242e;background:#0c0c10;color:#f2f0ea;font-size:16px}
 button{width:100%;box-sizing:border-box;padding:15px;margin-top:18px;border-radius:12px;
 border:0;background:#ffb300;color:#000;font-weight:700;font-size:16px}
 button:active{opacity:.8}
+button.alt{background:#24242e;color:#f2f0ea;font-weight:600;margin-top:10px}
+.known{margin-top:22px}
+.known h2{font-size:14px;color:#8b8b96;font-weight:600;margin:0 0 6px 2px}
+.row{display:flex;align-items:center;gap:10px;padding:10px 2px;
+border-top:1px solid #24242e}
+.row span{flex:1;font-size:15px;word-break:break-all}
+.row em{font-style:normal;color:#8b8b96;font-size:12px}
+.row button{width:auto;margin:0;padding:8px 14px;font-size:13px;
+background:#24242e;color:#ff5252;font-weight:600}
 #msg{min-height:24px;margin-top:14px}.ok{color:#3ddc84}.err{color:#ff5252}
 .foot{color:#8b8b96;font-size:12px;margin-top:26px}</style></head><body>
 <div class="logo">Pip<em>.</em></div>
@@ -24,17 +33,46 @@ button:active{opacity:.8}
 <input id="pass" type="password" placeholder="WiFi password">
 </div>
 <button onclick="save()">Connect</button>
+<button class="alt" onclick="scan()">Scan again</button>
 <p id="msg"></p>
+<div class="known" id="knownbox" style="display:none">
+<h2>Saved networks</h2>
+<div id="known"></div>
+</div>
 </div>
 <p class="foot">Keep this page open until your Pip is connected.</p>
 <script>
 let nets=[],poll,portalShown=false;
-fetch('/scan').then(r=>r.json()).then(list=>{
-  nets=list;
-  const s=document.getElementById('ssid');s.innerHTML='';
-  list.forEach(n=>{const o=document.createElement('option');o.textContent=n.n;s.append(o)});
-  passvis();
-}).catch(()=>{document.getElementById('msg').innerHTML='<span class=err>Scan failed - reload</span>'});
+function scan(){
+  const s=document.getElementById('ssid');
+  s.innerHTML='<option>Scanning...</option>';
+  fetch('/scan').then(r=>r.json()).then(list=>{
+    nets=list;s.innerHTML='';
+    list.forEach(n=>{const o=document.createElement('option');o.textContent=n.n;s.append(o)});
+    if(!list.length){s.innerHTML='<option>No networks found</option>'}
+    passvis();
+  }).catch(()=>{msg('<span class=err>Scan failed - try again</span>')});
+}
+function known(){
+  fetch('/known').then(r=>r.json()).then(list=>{
+    const box=document.getElementById('knownbox'),el=document.getElementById('known');
+    box.style.display=list.length?'':'none';
+    el.innerHTML='';
+    list.forEach(n=>{
+      const row=document.createElement('div');row.className='row';
+      const name=document.createElement('span');name.textContent=n.n;
+      if(n.a){const tag=document.createElement('em');tag.textContent=' in use';name.append(tag)}
+      const b=document.createElement('button');b.textContent='Forget';
+      b.onclick=()=>forget(n.n);
+      row.append(name,b);el.append(row);
+    });
+  }).catch(()=>{});
+}
+function forget(ssid){
+  fetch('/forget',{method:'POST',body:new URLSearchParams({ssid})})
+    .then(()=>known()).catch(()=>{});
+}
+scan();known();
 function passvis(){
   const n=nets[ssid.selectedIndex];
   document.getElementById('passrow').style.display=(n&&n.o)?'none':'';
@@ -45,6 +83,7 @@ function save(){
   fetch('/save',{method:'POST',body}).then(()=>{
     portalShown=false;
     msg('Connecting your Pip...');
+    known();
     clearInterval(poll);
     poll=setInterval(check,2000);
   });

@@ -23,6 +23,20 @@ void ui_fg_label(lv_obj_t *label, bool dim)
     }
 }
 
+/* ui_fg_label's rules for drawn art (arcs, dots) that has no text style
+ * to carry them */
+lv_color_t ui_fg_color(bool dim)
+{
+    if (g_ui.theme_active)
+        return g_ui.theme_black_text ? lv_color_black() : lv_color_white();
+    return dim ? COL_TEXT_DIM : COL_TEXT;
+}
+
+lv_opa_t ui_fg_opa(bool dim)
+{
+    return (g_ui.theme_active && dim) ? LV_OPA_70 : LV_OPA_COVER;
+}
+
 void ui_fg_header(lv_obj_t *bar)
 {
     /* children are the (optional) back button and the title label */

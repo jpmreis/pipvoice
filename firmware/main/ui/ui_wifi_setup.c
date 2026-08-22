@@ -16,6 +16,7 @@ static void exit_clicked(lv_event_t *e)
 {
     LV_UNUSED(e);
     if (g_ui.cb.wifi_setup_exit) g_ui.cb.wifi_setup_exit();
+    ui_offline_defer();      /* they just tried: don't nag on arrival */
     nav_to(SCR_HOME, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
 }
 
