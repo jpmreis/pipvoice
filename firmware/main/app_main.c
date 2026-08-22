@@ -446,10 +446,9 @@ void app_main(void)
     board_set_brightness(g_cfg.brightness);
     vTaskDelay(pdMS_TO_TICKS(UI_SPLASH_MS + 300));
 
-    /* Both of these poll the PMU over I2C, and power_init's first battery
-     * read fires immediately - with a charger attached the AXP2101 has
-     * more to say, which is why the greeting only stuttered while plugged
-     * in. They cost nothing during a 2 s animation nobody can interrupt. */
+    /* Both poll the PMU over I2C and power_init's first battery read
+     * fires immediately; neither is worth sharing the greeting with,
+     * and nothing can interrupt a 2 s animation anyway. */
     power_init(ev_battery);             /* battery poll + inactivity dimming */
     xTaskCreate(button_task, "buttons", 3072, NULL, 3, NULL);
 

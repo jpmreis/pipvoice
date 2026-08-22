@@ -78,6 +78,31 @@ lv_obj_t *scr_splash_create(void)
     return s_scr;
 }
 
+/* ------------- prewarm: one fully-drawn frame, before anything moves ---
+ * At boot every glyph here is rasterized for the first time and the font
+ * bitmaps come off flash cold - that is what the first second of the
+ * greeting was paying for. The same animation runs smooth on wake, where
+ * those caches are already hot. Both callers draw this while the panel is
+ * dark, so the finished wordmark is never actually seen. */
+void scr_splash_prewarm(void)
+{
+    if (g_ui.owner_name[0])
+        lv_label_set_text_fmt(s_hello, "Hello %s", g_ui.owner_name);
+    lv_obj_align(s_hello, LV_ALIGN_BOTTOM_MID, 0, -56);
+
+    for (int i = 0; i < 3; i++) {
+        lv_anim_delete(s_letters[i], NULL);   /* a previous run, mid-flight */
+        lv_obj_set_style_opa(s_letters[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_translate_y(s_letters[i], 0, 0);
+    }
+    lv_anim_delete(s_dot, NULL);
+    lv_obj_set_style_opa(s_dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_translate_y(s_dot, DOT_REST_TY, 0);
+    lv_anim_delete(s_hello, NULL);
+    lv_obj_set_style_opa(s_hello, LV_OPA_COVER, 0);
+    lv_obj_set_style_translate_y(s_hello, 0, 0);
+}
+
 /* ------------- show: reset + arm the animations ------------- */
 void scr_splash_show(void)
 {

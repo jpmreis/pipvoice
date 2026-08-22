@@ -12,6 +12,13 @@ write entries for humans.
 
 ## [Unreleased]
 
+### Fixed
+- Boot greeting: the wordmark is drawn once, fully, while the panel is
+  still dark before the animation rewinds and plays. At boot every glyph
+  is rasterized for the first time off cold flash, which is what the
+  first second of the animation was spending its frames on - the same
+  animation is smooth on wake, where those caches are hot.
+
 ## [0.1.33] — 2026-08-22
 
 ### Fixed
@@ -25,9 +32,9 @@ write entries for humans.
   splash is put on the panel synchronously and the backlight comes up
   on the animation itself.
 - The battery poll and button task now start after the greeting rather
-  than during it. Both talk to the power chip over I2C, and its first
-  read fires immediately - with a charger attached there is more to
-  read, which is why the stutter showed up when plugging in.
+  than during it: both talk to the power chip over I2C and the first
+  read fires immediately, which is work a 2 s animation should not have
+  to share a system with.
 
 ## [0.1.32] — 2026-08-22
 

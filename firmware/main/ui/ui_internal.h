@@ -96,6 +96,7 @@ void scr_inbox_apply_theme(void);
 lv_obj_t *scr_wifi_setup_create(void);
 void scr_wifi_setup_show(const char *ssid, const char *pass);
 lv_obj_t *scr_splash_create(void);   void scr_splash_show(void);
+void scr_splash_prewarm(void);       /* draw once cold, then animate */
 
 /* record screen hooks used by ui_core dispatchers */
 void scr_record_tick(uint16_t elapsed_s, uint16_t max_s);

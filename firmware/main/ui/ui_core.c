@@ -99,10 +99,18 @@ void ui_splash_show(void)
      * defers the actual screen switch to the next anim tick even for
      * ANIM_NONE. lv_screen_load() is time-0 -> switches now. */
     if (nav_locked_out()) return;
-    scr_splash_show();
     s_cur = SCR_SPLASH;
     ui_offline_hide();
+
+    /* Draw the finished wordmark once, cold, then rewind and animate:
+     * rasterizing those glyphs is what the first second of the boot
+     * greeting used to spend its frames on. Both refreshes land while
+     * the panel is dark. */
+    scr_splash_prewarm();
     lv_screen_load(s_screens[SCR_SPLASH]);
+    lv_refr_now(NULL);
+
+    scr_splash_show();
     lv_refr_now(NULL);
 }
 
