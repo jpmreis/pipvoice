@@ -12,6 +12,10 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [0.1.32] — 2026-08-22
+
+Fixes from testing 0.1.31 on a box.
+
 ### Fixed
 - The boot greeting no longer stutters. The splash used to animate on
   top of the heaviest part of boot - the cached background being read
