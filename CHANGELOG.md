@@ -12,16 +12,6 @@ write entries for humans.
 
 ## [Unreleased]
 
-### Changed
-- The ambient screen's envelope has become the amber dot from the splash
-  wordmark — the full stop of "Pip." out wandering for the night. It
-  still moves to a new spot every minute, now greeting each one with a
-  little squash-and-stretch bounce, and a touch no longer blanks the
-  panel: the letters fall in as they always have while the dot glides
-  home from wherever the night left it, brightness easing up alongside.
-  The dot lights about a seventh of the pixels the envelope did, so the
-  panel sleeps easier too.
-
 ## [0.1.36] — 2026-08-23
 
 A firmware release: boxes get a new sleep state. Phones and the server
@@ -29,21 +19,25 @@ are unchanged apart from three new background themes.
 
 ### Added
 - A box that falls asleep with unheard messages no longer goes dark: the
-  panel stays on a black screen showing one small amber envelope at about
-  a third of full brightness, so "you have mail" is readable across the
-  room without waking anything. No count, no clock, no animation. With
-  nothing unheard the screen goes fully off exactly as before, and quiet
-  hours keep it dark too — a message left unheard from before bedtime
-  shouldn't glow all night.
+  amber dot from the hello-splash — the full stop of "Pip." — stays on
+  the black screen at about a third of full brightness, out wandering
+  for the night. It moves to a new spot on a 48-cell grid every minute
+  and greets each one with a little squash-and-stretch bounce, so "you
+  have mail" catches a passing eye across a dark room while no pixel
+  holds the dot for more than ~2% of the ambient hours (a 14 px dot
+  lights well under 0.1% of the panel — and amber was already the
+  safest colour to hold here: its blue channel is dark, and blue
+  emitters age fastest). With nothing unheard the screen goes fully off
+  exactly as before, and quiet hours keep it dark too — a message left
+  unheard from before bedtime shouldn't glow all night.
 
-  The icon moves to a new spot on a 48-cell grid every minute, which keeps
-  any one pixel lit for about 2% of the ambient hours; amber was already
-  the safest colour to hold on this panel (its blue channel is dark, and
-  blue emitters age fastest). Touching the screen brings back the usual
-  hello-splash; the buttons still go straight to recording or the inbox.
+  Touching the screen blanks nothing: the "Pip" letters fall in as they
+  always have while the dot glides home from wherever the night left it
+  and lands as the wordmark's full stop, brightness easing up
+  alongside. The buttons still go straight to recording or the inbox.
 
-  A message arriving overnight gets the chime and the icon, but no toast
-  — the icon is the notification, and a lit card at 3 a.m. is not.
+  A message arriving overnight gets the chime and the dot, but no toast
+  — the dot is the notification, and a lit card at 3 a.m. is not.
 - Three new background themes to pick from in Settings: Benfica,
   Portugal and Namibia.
 
