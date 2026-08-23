@@ -138,16 +138,19 @@ def _waiting(c) -> list[dict]:
     have installed - the schema cannot say which install is behind, only
     how many are subscribed to push (0 is the interesting case: nothing on
     that account can be woken)."""
-    rows = db.all_(c, """SELECT m.recipient AS uid, u.display_name, d.id AS box,
-                                d.last_seen, COUNT(*) AS n,
-                                (julianday('now') -
-                                 julianday(MIN(m.created))) * 24 AS oldest_h
-                         FROM messages m
-                         JOIN users u ON u.id = m.recipient
-                         LEFT JOIN devices d ON d.user_id = m.recipient
-                         WHERE m.delivered = 0
-                         GROUP BY m.recipient
-                         ORDER BY n DESC, oldest_h DESC""")
+    # aggregate before joining devices: a second box on one account would
+    # otherwise fan the message rows out and double every count
+    rows = db.all_(c, """SELECT w.uid, u.display_name, d.id AS box,
+                                d.last_seen, w.n, w.oldest_h
+                         FROM (SELECT recipient AS uid, COUNT(*) AS n,
+                                      (julianday('now') -
+                                       julianday(MIN(created))) * 24
+                                        AS oldest_h
+                               FROM messages WHERE delivered = 0
+                               GROUP BY recipient) w
+                         JOIN users u ON u.id = w.uid
+                         LEFT JOIN devices d ON d.user_id = w.uid
+                         ORDER BY w.n DESC, w.oldest_h DESC""")
     installs = {r["user_id"]: r["n"] for r in
                 db.all_(c, "SELECT user_id, COUNT(*) n FROM push_subs "
                            "GROUP BY user_id")}
