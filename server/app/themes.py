@@ -32,12 +32,15 @@ DEVICE_W, DEVICE_H = 368, 448
 THUMB_W, THUMB_H = 108, 132
 
 THEMES = [
-    {"name": "cloud",  "label": "Cloud",  "fg": "white"},
-    {"name": "dark",   "label": "Dark",   "fg": "white"},
-    {"name": "garden", "label": "Garden", "fg": "black"},
-    {"name": "olivia", "label": "Olivia", "fg": "black"},
-    {"name": "pink",   "label": "Pink",   "fg": "black"},
-    {"name": "sea",    "label": "Sea",    "fg": "white"},
+    {"name": "cloud",    "label": "Cloud",    "fg": "white"},
+    {"name": "dark",     "label": "Dark",     "fg": "white"},
+    {"name": "garden",   "label": "Garden",   "fg": "black"},
+    {"name": "olivia",   "label": "Olivia",   "fg": "black"},
+    {"name": "pink",     "label": "Pink",     "fg": "black"},
+    {"name": "sea",      "label": "Sea",      "fg": "white"},
+    {"name": "benfica",  "label": "Benfica",  "fg": "white"},
+    {"name": "portugal", "label": "Portugal", "fg": "black"},
+    {"name": "namibia",  "label": "Namibia",  "fg": "white"},
 ]
 
 
