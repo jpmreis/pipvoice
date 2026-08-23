@@ -111,8 +111,66 @@ def login_post(request: Request, action: str = Form(...),
 
 
 # ---------- dashboard ----------
+def _size(n: int) -> str:
+    """Bytes at whatever unit reads best - a family server can sit at a few
+    hundred KB for weeks, and "0.0 MB" says nothing."""
+    for unit, step in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
+        if n >= step:
+            return f"{n / step:.1f} {unit}"
+    return f"{n} B"
+
+
+def _age(hours: float) -> str:
+    """Compact age for the waiting list: minutes, hours, then days."""
+    if hours < 1:
+        return f"{max(int(hours * 60), 1)} min"
+    if hours < 48:
+        return f"{hours:.0f} h"
+    return f"{hours / 24:.0f} d"
+
+
+def _waiting(c) -> list[dict]:
+    """Who is still owed messages, one row per recipient.
+
+    Delivery is acked per message per *recipient*, not per client: the box
+    acks after writing to its flash, a PWA after fetching. So a box maps to
+    exactly one row here, while a phone user's row covers every PWA they
+    have installed - the schema cannot say which install is behind, only
+    how many are subscribed to push (0 is the interesting case: nothing on
+    that account can be woken)."""
+    rows = db.all_(c, """SELECT m.recipient AS uid, u.display_name, d.id AS box,
+                                d.last_seen, COUNT(*) AS n,
+                                (julianday('now') -
+                                 julianday(MIN(m.created))) * 24 AS oldest_h
+                         FROM messages m
+                         JOIN users u ON u.id = m.recipient
+                         LEFT JOIN devices d ON d.user_id = m.recipient
+                         WHERE m.delivered = 0
+                         GROUP BY m.recipient
+                         ORDER BY n DESC, oldest_h DESC""")
+    installs = {r["user_id"]: r["n"] for r in
+                db.all_(c, "SELECT user_id, COUNT(*) n FROM push_subs "
+                           "GROUP BY user_id")}
+    out = []
+    for r in rows:
+        subs = installs.get(r["uid"], 0)
+        out.append({
+            "target": r["box"] or r["display_name"],
+            "owner": r["display_name"] if r["box"] else "",
+            "kind": "box" if r["box"] else
+                    (f"PWA, {subs} install{'' if subs == 1 else 's'}"
+                     if subs else "PWA, no install subscribed"),
+            "quiet": not r["box"] and not subs,
+            "last_seen": r["last_seen"] if r["box"] else None,
+            "n": r["n"],
+            "oldest": _age(r["oldest_h"] or 0),
+        })
+    return out
+
+
 @router.get("", response_class=HTMLResponse)
 def dashboard(request: Request, ident: Identity = AdminDep):
+    stored, stored_bytes = db.audio_usage()
     with db.conn() as c:
         stats = {
             "users": db.one(c, "SELECT COUNT(*) n FROM users")["n"],
@@ -120,12 +178,15 @@ def dashboard(request: Request, ident: Identity = AdminDep):
             "messages": db.one(c, "SELECT COUNT(*) n FROM messages")["n"],
             "pending": db.one(c, "SELECT COUNT(*) n FROM messages "
                                  "WHERE delivered=0")["n"],
+            "stored": stored,
+            "stored_size": _size(stored_bytes),
         }
+        waiting = _waiting(c)
         devices = db.all_(c, """SELECT d.id, d.last_seen, u.display_name
                                 FROM devices d JOIN users u ON u.id=d.user_id
                                 ORDER BY d.id""")
     return _page(request, "dashboard.html", stats=stats, devices=devices,
-                 me=ident)
+                 waiting=waiting, me=ident)
 
 
 # ---------- users ----------

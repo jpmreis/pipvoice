@@ -3,8 +3,24 @@
 <div class="grid">
 <div class="card"><div class="stat">{{ stats.users }}</div>Users</div>
 <div class="card"><div class="stat">{{ stats.devices }}</div>Devices</div>
-<div class="card"><div class="stat">{{ stats.messages }}</div>Messages</div>
+<div class="card"><div class="stat">{{ stats.messages }}</div>Message rows</div>
+<div class="card"><div class="stat">{{ stats.stored }}</div>Stored on server
+<div class="muted">{{ stats.stored_size }} of audio</div></div>
 <div class="card"><div class="stat">{{ stats.pending }}</div>Undelivered</div>
+</div>
+<div class="card"><h2>Waiting to be delivered</h2>
+{% if waiting %}<table>
+<tr><th>Waiting for</th><th>Messages</th><th>Oldest</th><th>Last seen</th></tr>
+{% for w in waiting %}<tr>
+<td>{{ w.target }}{% if w.owner %} <span class="muted">{{ w.owner }}</span>{% endif %}
+<div class="muted{% if w.quiet %} bad{% endif %}">{{ w.kind }}</div></td>
+<td>{{ w.n }}</td><td>{{ w.oldest }}</td>
+<td class="muted">{{ w.last_seen or "—" }}</td>
+</tr>{% endfor %}
+</table>
+<p class="muted">Delivery is acked per recipient, not per client, so a phone
+user's row covers every PWA on that account.</p>
+{% else %}<p class="muted">Everything delivered.</p>{% endif %}
 </div>
 <div class="card"><h2>Devices</h2><table>
 <tr><th>Device</th><th>Owner</th><th>Last seen</th></tr>

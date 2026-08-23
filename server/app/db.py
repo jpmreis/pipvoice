@@ -193,5 +193,31 @@ def drop_audio(msg_id: str) -> bool:
     return gone
 
 
+def audio_usage() -> tuple[int, int]:
+    """(messages with audio still on disk, bytes used by all renderings).
+
+    The messages table is not the answer: a device recipient's row outlives
+    its audio by up to RETENTION_DAYS (cleanup.py keeps the row so the box's
+    inbox mirror survives), so rows overcount what is actually stored here.
+    One .vmsg per message is the real count; the derived .m4a only adds to
+    the size."""
+    n = size = 0
+    try:
+        entries = os.scandir(AUDIO_DIR)
+    except FileNotFoundError:
+        return 0, 0
+    with entries as it:
+        for e in it:
+            if not e.name.endswith(AUDIO_EXTS) or not e.is_file():
+                continue
+            if e.name.endswith(".vmsg"):
+                n += 1
+            try:
+                size += e.stat().st_size
+            except OSError:      # swept between scandir and stat
+                pass
+    return n, size
+
+
 def firmware_path(version: str) -> str:
     return os.path.join(FIRMWARE_DIR, f"{version}.bin")
