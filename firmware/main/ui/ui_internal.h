@@ -67,6 +67,7 @@ extern ui_state_t g_ui;
 typedef enum {
     SCR_HOME, SCR_RECORD, SCR_INBOX, SCR_PLAYBACK,
     SCR_PINPAD, SCR_SETTINGS, SCR_THEME_PICKER, SCR_WIFI_SETUP, SCR_SPLASH,
+    SCR_AMBIENT,
     SCR_COUNT,
 } ui_screen_id_t;
 
@@ -96,6 +97,10 @@ void scr_inbox_apply_theme(void);
 lv_obj_t *scr_wifi_setup_create(void);
 void scr_wifi_setup_show(const char *ssid, const char *pass);
 lv_obj_t *scr_splash_create(void);   void scr_splash_show(void);
+/* ambient "you have mail" screen: show/hide only start and stop the
+ * position-shift timer - ui_ambient_enter/exit do the screen swap */
+lv_obj_t *scr_ambient_create(void); void scr_ambient_show(void);
+void scr_ambient_hide(void);
 
 /* record screen hooks used by ui_core dispatchers */
 void scr_record_tick(uint16_t elapsed_s, uint16_t max_s);
@@ -146,5 +151,8 @@ lv_obj_t *mk_button(lv_obj_t *parent, const char *txt, lv_color_t bg,
 lv_obj_t *mk_round_button(lv_obj_t *parent, int diameter, lv_color_t bg,
                           lv_event_cb_t cb, void *user_data);
 void      ui_toast(const char *text, lv_color_t color);
+/* drop any toast still on lv_layer_top() right now (not async): a lit box
+ * is exactly what the ambient screen exists to avoid */
+void      ui_toast_clear(void);
 
 #endif /* PIP_UI_INTERNAL_H */

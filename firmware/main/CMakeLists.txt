@@ -8,6 +8,7 @@ idf_component_register(
         "ui/ui_inbox.c" "ui/ui_playback.c" "ui/ui_pinpad.c"
         "ui/ui_settings.c" "ui/ui_theme_picker.c"
         "ui/ui_wifi_setup.c" "ui/ui_splash.c" "ui/ui_offline.c"
+        "ui/ui_ambient.c"
         "ui/ui_react.c"
         "ui/assets/emoji_heart.c" "ui/assets/emoji_up.c"
         "ui/assets/emoji_down.c" "ui/assets/emoji_joy.c"

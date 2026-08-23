@@ -19,6 +19,10 @@ bool ui_screen_is(ui_screen_id_t id) { return s_cur == id; }
 static void ui_tick_cb(lv_timer_t *t)
 {
     LV_UNUSED(t);
+    /* ambient is one icon on black by construction: neither the status bar
+     * nor the offline nag is on screen there, and the nag is home-only
+     * anyway. Both come back on the next tick after we leave. */
+    if (ui_screen_is(SCR_AMBIENT)) return;
     scr_home_update_status();
     ui_offline_eval();
 }
@@ -57,6 +61,7 @@ void ui_init(const ui_callbacks_t *cbs)
     s_screens[SCR_THEME_PICKER] = scr_theme_picker_create();
     s_screens[SCR_WIFI_SETUP] = scr_wifi_setup_create();
     s_screens[SCR_SPLASH]     = scr_splash_create();
+    s_screens[SCR_AMBIENT]    = scr_ambient_create();
 
     scr_home_refresh();
     lv_screen_load(s_screens[SCR_HOME]);
@@ -104,6 +109,47 @@ void ui_splash_show(void)
     ui_offline_hide();
     lv_screen_load(s_screens[SCR_SPLASH]);
     lv_refr_now(NULL);
+}
+
+/* ---------------- ambient ("mail waiting") screen ---------------- */
+bool ui_ambient_wanted(void)
+{
+    /* nav_locked_out(): a recording in progress and the provisioning QR are
+     * the two screens that must never be replaced by an icon */
+    return g_ui.unheard_count > 0 && !g_ui.dnd && !nav_locked_out();
+}
+
+bool ui_ambient_enter(void)
+{
+    if (!ui_ambient_wanted()) return false;
+    if (ui_screen_is(SCR_AMBIENT)) return true;
+
+    /* lv_layer_top() sits over every screen, so anything parked there would
+     * be lit right along with the icon - and a nag card or a toast is the
+     * opposite of what this screen is for. Both are synchronous deletes:
+     * the lv_refr_now() below would otherwise still paint them once. */
+    ui_offline_hide();
+    ui_toast_clear();
+
+    scr_ambient_show();
+    s_cur = SCR_AMBIENT;
+    lv_screen_load(s_screens[SCR_AMBIENT]);   /* time-0, like ui_splash_show */
+    lv_refr_now(NULL);                        /* on the panel before the
+                                                 caller raises brightness   */
+    return true;
+}
+
+void ui_ambient_exit(void)
+{
+    if (!ui_screen_is(SCR_AMBIENT)) return;   /* idempotent: waking from a
+                                                 fully dark panel lands here */
+    scr_ambient_hide();
+    scr_home_refresh();
+    s_cur = SCR_HOME;
+    lv_screen_load(s_screens[SCR_HOME]);
+    lv_refr_now(NULL);   /* the caller is about to light the panel, or a
+                            splash is about to paint over this - either way
+                            no frame of the icon may survive */
 }
 
 /* ---------------- data setters ---------------- */

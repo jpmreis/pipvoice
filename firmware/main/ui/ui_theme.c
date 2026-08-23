@@ -162,11 +162,20 @@ static void toast_dismiss_cb(lv_event_t *e)
     if (!t) return;                    /* already dismissed */
     lv_timer_delete(t);
     lv_obj_set_user_data(box, NULL);
+    /* the delete is async (we are inside this object's own event), so drop
+     * the tag first: ui_toast_clear() deleting it synchronously in the
+     * meantime would leave the queued async call holding a freed pointer */
+    lv_obj_remove_flag(box, LV_OBJ_FLAG_USER_1);
     lv_obj_delete_async(box);
 }
 
 void ui_toast(const char *text, lv_color_t color)
 {
+    /* Ambient: the icon on screen is already the notification and the chime
+     * is the alert. A toast here would light a big box in the middle of the
+     * night on a screen built to stay nearly dark. */
+    if (ui_screen_is(SCR_AMBIENT)) return;
+
     lv_obj_t *box = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(box);
     lv_obj_set_style_bg_color(box, COL_SURFACE2, 0);
@@ -191,6 +200,23 @@ void ui_toast(const char *text, lv_color_t color)
     lv_timer_set_repeat_count(t, 1);
     lv_obj_set_user_data(box, t);
     lv_obj_add_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(box, LV_OBJ_FLAG_USER_1);   /* marks it for ui_toast_clear */
     lv_obj_add_event_cb(box, toast_dismiss_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(box, toast_dismiss_cb, LV_EVENT_GESTURE, NULL);
+}
+
+/* Toasts share lv_layer_top() with the power shield, so they cannot be
+ * cleared by emptying the layer; USER_1 tags the ones that are ours.
+ * The delete is synchronous on purpose - the only caller (ui_ambient_enter)
+ * paints immediately afterwards, and an async delete would still show. */
+void ui_toast_clear(void)
+{
+    lv_obj_t *top = lv_layer_top();
+    for (int32_t i = (int32_t)lv_obj_get_child_count(top) - 1; i >= 0; i--) {
+        lv_obj_t *box = lv_obj_get_child(top, i);
+        if (!lv_obj_has_flag(box, LV_OBJ_FLAG_USER_1)) continue;
+        lv_timer_t *t = lv_obj_get_user_data(box);
+        if (t) lv_timer_delete(t);
+        lv_obj_delete(box);
+    }
 }

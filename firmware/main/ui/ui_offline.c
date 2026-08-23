@@ -28,15 +28,20 @@ static uint32_t  s_down_since;        /* tick of the drop; 0 = not down   */
 static uint32_t  s_snoozed_at;
 static bool      s_snoozed;
 
-static void close_overlay(void)
+static void close_overlay(bool async)
 {
     if (!s_scrim) return;
-    /* async: we may be inside an event of one of its children */
-    lv_obj_delete_async(s_scrim);
+    /* async when we may be inside an event of one of its children (a tap on
+     * the backdrop or on one of the buttons); synchronous otherwise, because
+     * callers that blank the panel and repaint - ui_splash_show(),
+     * ui_ambient_enter() - would otherwise paint the card one more time on
+     * top of what they just loaded. */
+    if (async) lv_obj_delete_async(s_scrim);
+    else       lv_obj_delete(s_scrim);
     s_scrim = NULL;
 }
 
-void ui_offline_hide(void) { close_overlay(); }
+void ui_offline_hide(void) { close_overlay(false); }
 
 /* The user just worked on the connection (came out of WiFi setup): give
  * them the full quiet period again instead of nagging the moment they
@@ -51,7 +56,7 @@ static void snooze(void)
 {
     s_snoozed    = true;
     s_snoozed_at = lv_tick_get();
-    close_overlay();
+    close_overlay(true);      /* called from the overlay's own events */
 }
 
 static void dismiss_clicked(lv_event_t *e)
@@ -130,7 +135,7 @@ void ui_offline_eval(void)
     if (g_ui.wifi != UI_WIFI_OFFLINE && g_ui.wifi != UI_WIFI_CONNECTING) {
         s_down_since = 0;
         s_snoozed    = false;        /* back online: start fresh next time */
-        close_overlay();
+        close_overlay(false);
         return;
     }
 
@@ -141,7 +146,7 @@ void ui_offline_eval(void)
     /* lv_tick_get() counts from board_init, i.e. this boot: still settling */
     if (lv_tick_get() < BOOT_QUIET_MS) return;
 
-    if (!ui_screen_is(SCR_HOME)) { close_overlay(); return; }
+    if (!ui_screen_is(SCR_HOME)) { close_overlay(false); return; }
     if (s_scrim) return;                                  /* already up  */
     if (lv_tick_elaps(s_down_since) < GRACE_MS) return;   /* just a blip */
     if (s_snoozed && lv_tick_elaps(s_snoozed_at) < SNOOZE_MS) return;

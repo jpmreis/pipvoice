@@ -12,6 +12,21 @@ write entries for humans.
 
 ## [Unreleased]
 
+### Added
+- A box that falls asleep with unheard messages no longer goes dark: the
+  panel stays on a black screen showing one small amber envelope at about
+  a third of full brightness, so "you have mail" is readable across the
+  room without waking anything. No count, no clock, no animation. With
+  nothing unheard the screen goes fully off exactly as before, and quiet
+  hours keep it dark too — a message left unheard from before bedtime
+  shouldn't glow all night.
+
+  The icon moves to a new spot on a 48-cell grid every minute, which keeps
+  any one pixel lit for about 2% of the ambient hours; amber was already
+  the safest colour to hold on this panel (its blue channel is dark, and
+  blue emitters age fastest). Touching the screen brings back the usual
+  hello-splash; the buttons still go straight to recording or the inbox.
+
 ## [0.1.35] — 2026-08-23
 
 A PWA release. The firmware is identical to 0.1.34 apart from its
