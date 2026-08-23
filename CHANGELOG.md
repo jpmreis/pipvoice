@@ -12,6 +12,16 @@ write entries for humans.
 
 ## [Unreleased]
 
+### Changed
+- The ambient screen's envelope has become the amber dot from the splash
+  wordmark — the full stop of "Pip." out wandering for the night. It
+  still moves to a new spot every minute, now greeting each one with a
+  little squash-and-stretch bounce, and a touch no longer blanks the
+  panel: the letters fall in as they always have while the dot glides
+  home from wherever the night left it, brightness easing up alongside.
+  The dot lights about a seventh of the pixels the envelope did, so the
+  panel sleeps easier too.
+
 ## [0.1.36] — 2026-08-23
 
 A firmware release: boxes get a new sleep state. Phones and the server

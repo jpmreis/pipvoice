@@ -34,6 +34,26 @@ static volatile bool s_hold;
 static lv_obj_t    *s_shield;   /* topmost transparent layer while dimmed/off:
                                    the wake-up tap must not reach the UI */
 
+/* touch-wake from ambient: the panel stays lit, so brightness eases from
+ * AMBIENT_LEVEL to full over the splash instead of stepping */
+static void bright_exec(void *var, int32_t v)
+{
+    LV_UNUSED(var);
+    board_set_brightness((uint8_t)v);
+}
+
+static void brightness_ramp(uint8_t from, uint8_t to)
+{
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, &s_full_brightness);   /* stable address as anim id */
+    lv_anim_set_values(&a, from, to);
+    lv_anim_set_duration(&a, 500);
+    lv_anim_set_exec_cb(&a, bright_exec);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
+    lv_anim_start(&a);
+}
+
 static void shield_pressed(lv_event_t *e)
 {
     /* LVGL task context (lock held): wake and swallow the tap */
@@ -47,20 +67,23 @@ static void shield_pressed(lv_event_t *e)
     }
     if (was_asleep) {
         if (was_ambient) {
-            /* unlike PWR_OFF the panel is lit here, so blank it before the
-             * screen swap - the icon must not be seen sliding away */
-            board_set_brightness(0);
-            ui_ambient_exit();       /* we are the LVGL task with the lock
-                                        held; no board_lock() needed        */
-        }
-        ui_splash_show();            /* full sleep gets the hello again;
+            /* the panel is lit and stays lit: no blank, no home flash -
+             * the wandering dot glides into the splash wordmark while
+             * brightness eases up (we are the LVGL task with the lock
+             * held; no board_lock() needed) */
+            ui_ambient_wake_to_splash();
+            brightness_ramp(AMBIENT_LEVEL, s_full_brightness);
+        } else {
+            ui_splash_show();        /* full sleep gets the hello again;
                                         paints while the panel is dark so
                                         the old screen never flashes */
+        }
         ota_kick();                  /* someone's here: good moment to pick
                                         up a pending firmware update */
     }
     net_wifi_retry_now();            /* their hotspot may be awake again */
-    board_set_brightness(s_full_brightness);
+    if (!was_ambient)
+        board_set_brightness(s_full_brightness);
 }
 
 static void shield_set(bool on)   /* caller holds the LVGL lock */
@@ -77,9 +100,10 @@ static void shield_set(bool on)   /* caller holds the LVGL lock */
     }
 }
 
-/* Leaving ambient always blanks first: unlike PWR_OFF the panel *is* lit,
- * so the swap back to home would otherwise be visible. The caller sets the
- * new brightness afterwards. */
+/* Every way out of ambient except the touch-wake (shield_pressed, which
+ * choreographs the dot into the splash on a lit panel) blanks first:
+ * unlike PWR_OFF the panel *is* lit, so the swap back to home would
+ * otherwise be visible. The caller sets the new brightness afterwards. */
 static void leave_ambient(void)
 {
     board_set_brightness(0);

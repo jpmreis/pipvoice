@@ -152,6 +152,26 @@ void ui_ambient_exit(void)
                             no frame of the icon may survive */
 }
 
+void ui_ambient_wake_to_splash(void)
+{
+    /* The touch-wake handoff. Unlike ui_ambient_exit + ui_splash_show this
+     * runs with the panel LIT, so it must go ambient -> splash directly
+     * (the exit path's detour through home would flash) and the splash's
+     * dot must start exactly where the ambient dot stands - it then glides
+     * home into the wordmark while the letters fall in as usual. */
+    if (!ui_screen_is(SCR_AMBIENT)) { ui_splash_show(); return; }
+    int32_t x, y;
+    scr_ambient_dot_pos(&x, &y);
+    scr_ambient_hide();
+    scr_splash_show_from(x, y);
+    s_cur = SCR_SPLASH;
+    ui_offline_hide();
+    lv_screen_load(s_screens[SCR_SPLASH]);    /* time-0: the next frame is
+                                                 the splash with the dot in
+                                                 the same place - seamless */
+    lv_refr_now(NULL);
+}
+
 /* ---------------- data setters ---------------- */
 void ui_set_owner_name(const char *name)
 {

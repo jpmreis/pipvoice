@@ -97,10 +97,16 @@ void scr_inbox_apply_theme(void);
 lv_obj_t *scr_wifi_setup_create(void);
 void scr_wifi_setup_show(const char *ssid, const char *pass);
 lv_obj_t *scr_splash_create(void);   void scr_splash_show(void);
+/* ambient touch-wake entry: dot starts at (x, y) and glides home into the
+ * wordmark instead of dropping in from above */
+void scr_splash_show_from(int32_t from_x, int32_t from_y);
 /* ambient "you have mail" screen: show/hide only start and stop the
  * position-shift timer - ui_ambient_enter/exit do the screen swap */
 lv_obj_t *scr_ambient_create(void); void scr_ambient_show(void);
 void scr_ambient_hide(void);
+/* where the wandering dot rests right now (screen coords); freezes any
+ * bounce so the splash handoff starts from the same pose */
+void scr_ambient_dot_pos(int32_t *x, int32_t *y);
 
 /* record screen hooks used by ui_core dispatchers */
 void scr_record_tick(uint16_t elapsed_s, uint16_t max_s);
