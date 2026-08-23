@@ -7,13 +7,15 @@
  * power.c). No count, no clock: presence only. With nothing unheard the
  * panel still goes fully off, exactly as before.
  *
- * The dot relocates on a 60 s timer around a 48-cell grid (fixed shuffle,
+ * The dot relocates on a 10 s timer around a 48-cell grid (fixed shuffle,
  * s_order below) and greets each new spot with a short burst of
  * diminishing hops, squash-and-stretch and all (s_hops) - alive to a
- * passing eye, still for the rest of the minute. Burn-in shaped
+ * passing eye, still until the next move. Burn-in shaped
  * everything: a 14 px dot lights ~0.09 % of the panel (the envelope glyph
  * it replaced lit seven times more), no pixel holds it for more than
- * ~1/48 of the ambient hours, and between bursts nothing redraws.
+ * ~1/48 of the ambient hours, and between bursts nothing redraws. A
+ * shorter shift only spreads that dose more evenly - the per-pixel share
+ * is set by the grid, not by the rate.
  *
  * Touch-wake continuity lives in ui_ambient_wake_to_splash() (ui_core.c):
  * unlike every other way out of ambient the panel is NOT blanked - the
@@ -28,7 +30,7 @@
  */
 #include "ui_internal.h"
 
-#define AMBIENT_SHIFT_MS  (60 * 1000)   /* one full sweep every 48 minutes */
+#define AMBIENT_SHIFT_MS  (10 * 1000)   /* one full sweep every 8 minutes */
 
 #define DOT_SIZE          14    /* same as the splash wordmark's full stop */
 #define HOP_RISE          16    /* tallest hop of the greeting bounce      */
@@ -130,12 +132,20 @@ static void dot_reset(void)
     lv_obj_set_style_transform_scale_y(s_dot, LV_SCALE_NONE, 0);
 }
 
-static void place(void)
+/* rest position of the current cell, in screen coordinates (the dot is a
+ * direct child of a zero-padded screen, so set_pos coords are absolute) */
+static void cell_pos(int32_t *x, int32_t *y)
 {
     uint8_t cell = s_order[s_cursor];
-    lv_obj_set_pos(s_dot,
-                   AMBIENT_MARGIN + (cell % AMBIENT_COLS) * AMBIENT_STEP_X,
-                   AMBIENT_MARGIN + (cell / AMBIENT_COLS) * AMBIENT_STEP_Y);
+    *x = AMBIENT_MARGIN + (cell % AMBIENT_COLS) * AMBIENT_STEP_X;
+    *y = AMBIENT_MARGIN + (cell / AMBIENT_COLS) * AMBIENT_STEP_Y;
+}
+
+static void place(void)
+{
+    int32_t x, y;
+    cell_pos(&x, &y);
+    lv_obj_set_pos(s_dot, x, y);
 }
 
 static void advance(void)
@@ -190,12 +200,11 @@ void scr_ambient_hide(void)
 
 /* Where the dot rests right now, in screen coordinates - the touch-wake
  * handoff starts the splash dot here. Freezes any bounce first so both
- * screens agree on the pose. */
+ * screens agree on the pose, and reads the answer off the grid rather than
+ * lv_obj_get_coords(): clearing the hop's translate only marks the layout
+ * dirty, so the cached coords would still hold the mid-hop pose. */
 void scr_ambient_dot_pos(int32_t *x, int32_t *y)
 {
     dot_reset();
-    lv_area_t a;
-    lv_obj_get_coords(s_dot, &a);
-    *x = a.x1;
-    *y = a.y1;
+    cell_pos(x, y);
 }

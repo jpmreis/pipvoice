@@ -12,6 +12,31 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-08-23
+
+The first full version. Nothing new is switched on here — Pip has been
+carrying the family's messages for months, and this release is the two
+fixes the wandering-dot sleep screen needed to feel finished.
+
+### Changed
+- The sleeping dot now moves every 10 seconds instead of every minute,
+  so a passing glance is much more likely to catch it mid-hop. A full
+  sweep of the 48-cell grid takes 8 minutes rather than 48; the burn-in
+  budget is unchanged, since what each pixel takes is set by the grid,
+  not by how often the dot moves.
+
+### Fixed
+- Touching a sleeping box to wake it blanked the screen for the length
+  of the hello-splash: the dot vanished the instant you touched it and
+  the letters fell into an empty panel, which is exactly the seam the
+  sleep screen was built to avoid. The dot now stays where the night
+  left it and glides into the wordmark while the letters fall, as
+  intended. (The travelling dot was being drawn inside the "Pip"
+  wordmark's own box, so anywhere else on the panel it was clipped away
+  and simply not drawn.)
+- Waking mid-bounce started the glide from slightly the wrong place —
+  up to 16 px of jump at the moment of the touch.
+
 ## [0.1.36] — 2026-08-23
 
 A firmware release: boxes get a new sleep state. Phones and the server
