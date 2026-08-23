@@ -1,5 +1,6 @@
 # firmware
 firmware/build/
+firmware/tools/preview.png
 firmware/managed_components/
 firmware/sdkconfig
 firmware/sdkconfig.old
