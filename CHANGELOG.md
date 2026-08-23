@@ -12,6 +12,11 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [0.1.36] — 2026-08-23
+
+A firmware release: boxes get a new sleep state. Phones and the server
+are unchanged apart from three new background themes.
+
 ### Added
 - A box that falls asleep with unheard messages no longer goes dark: the
   panel stays on a black screen showing one small amber envelope at about
@@ -26,6 +31,15 @@ write entries for humans.
   the safest colour to hold on this panel (its blue channel is dark, and
   blue emitters age fastest). Touching the screen brings back the usual
   hello-splash; the buttons still go straight to recording or the inbox.
+
+  A message arriving overnight gets the chime and the icon, but no toast
+  — the icon is the notification, and a lit card at 3 a.m. is not.
+- Three new background themes to pick from in Settings: Benfica,
+  Portugal and Namibia.
+
+### Fixed
+- Waking a box while the "No WiFi" card was up could flash the card over
+  the hello-splash for a frame before it went away.
 
 ## [0.1.35] — 2026-08-23
 
