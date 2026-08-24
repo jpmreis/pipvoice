@@ -891,7 +891,12 @@ function manageCard(d) {
               autocorrect="off" spellcheck="false">
        <button class="btn accent mng-add">Add</button>
      </div>
-     <div class="small mng-err" style="color:var(--danger)"></div>`;
+     <div class="small mng-err" style="color:var(--danger)"></div>
+     <p class="small dim" style="margin:14px 0 0">
+       <a href="setup.html?flash=${esc(d.device_id)}"
+          style="color:inherit">Re-flash this box</a>
+       &mdash; needs a computer with Chrome/Edge; gives it new
+       credentials.</p>`;
   const wrap = card.querySelector(".mng-contacts");
   const empty = card.querySelector(".mng-empty");
   const err = card.querySelector(".mng-err");

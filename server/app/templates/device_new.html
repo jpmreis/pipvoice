@@ -1,5 +1,9 @@
 {% extends "base.html" %}{% block content %}
 <h1>Device {{ device_id }} provisioned</h1>
+<div class="card"><h2>Flash from this browser</h2>
+<p><a href="/app/setup.html?flash={{ device_id }}">Open the web flasher</a>
+(Chrome/Edge + USB). It issues a <b>fresh API token</b> - the one below
+stops working, so skip saving the secrets if you take this path.</p></div>
 <div class="card"><h2>Secrets (shown once - save them now)</h2>
 <p>API token: <code>{{ token }}</code></p>
 <p>MQTT password: <code>{{ mqtt_pass }}</code></p></div>

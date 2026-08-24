@@ -348,6 +348,21 @@ def _managed_device(c, device_id: str, ident: Identity):
     return dev
 
 
+def _flashable_device(c, device_id: str, ident: Identity):
+    """Flash paths only: the device admin, or any server admin (the admin
+    Devices page links here so a box can be web-flashed without first
+    reassigning its device admin). Contact editing stays device-admin-only
+    - being able to reflash a box is not a licence to edit its perms."""
+    if ident.is_admin:
+        dev = db.one(c, """SELECT d.user_id, u.username, u.display_name
+                           FROM devices d JOIN users u ON u.id=d.user_id
+                           WHERE d.id=?""", (device_id,))
+        if not dev:
+            raise HTTPException(404, "no such device")
+        return dev
+    return _managed_device(c, device_id, ident)
+
+
 @router.get("/managed")
 def managed_list(ident: Identity = AuthDep):
     with db.conn() as c:
@@ -487,12 +502,27 @@ def setup_rekey(device_id: str, ident: Identity = AuthDep,
     current credentials - it must be (re)flashed afterwards."""
     _no_device_tokens(ident)
     with db.conn() as c:
-        dev = _managed_device(c, device_id, ident)
+        dev = _flashable_device(c, device_id, ident)
     nonce = provision.rekey_device(device_id, dev["display_name"],
                                    str(body.get("pin", "")),
                                    str(body.get("server_url", "")))
-    return {"device_id": device_id,
+    # name: a deep-linked flash (?flash=<id>) may target a device outside
+    # the caller's /managed list, so the flasher can't look it up there
+    return {"device_id": device_id, "name": dev["display_name"],
             "manifest": _flash_manifest(device_id, nonce)}
+
+
+@router.get("/setup/{device_id}/online")
+def setup_online(device_id: str, ident: Identity = AuthDep):
+    """Post-flash poll: last_seen newer than the flash start means the box
+    booted, onboarded and authenticated. Same audience as the flash paths
+    (an admin-flashed device may not be in the caller's /managed list)."""
+    _no_device_tokens(ident)
+    with db.conn() as c:
+        _flashable_device(c, device_id, ident)
+        dev = db.one(c, "SELECT last_seen FROM devices WHERE id=?",
+                     (device_id,))
+    return {"last_seen": dev["last_seen"]}
 
 
 @router.get("/setup/asset/{version}/{name}.bin")
@@ -518,7 +548,7 @@ def setup_nvs(nonce: str, ident: Identity = AuthDep):
         raise HTTPException(410, "flash image expired - re-key the device")
     device_id, blob = got
     with db.conn() as c:
-        _managed_device(c, device_id, ident)   # only the device's admin
+        _flashable_device(c, device_id, ident)  # device admin or server admin
     return Response(blob, media_type="application/octet-stream")
 
 

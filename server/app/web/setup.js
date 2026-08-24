@@ -66,28 +66,45 @@ async function init() {
   catch (e) { state("st-login"); return; }
   state("st-start");
   if (!$("nu-server").value) $("nu-server").value = location.origin;
-  try {
-    const managed = await api("/managed");
-    if (managed.length) {
-      $("resume-card").style.display = "block";
-      const list = $("resume-list");
-      list.innerHTML = "";
-      for (const d of managed) {
-        const row = document.createElement("div");
-        row.className = "devrow";
-        row.innerHTML =
-          `<div class="who"><b></b><br><span class="small dim"></span></div>
-           <input class="pin" maxlength="4" inputmode="numeric"
-                  placeholder="new PIN" style="width:110px;margin:0">
-           <button class="btn">Flash</button>`;
-        row.querySelector("b").textContent = d.name;
-        row.querySelector("span").textContent =
-          "@" + d.username + " · " + d.device_id;
-        row.querySelector("button").onclick = () => rekey(d, row);
-        list.appendChild(row);
+  /* ?flash=<device_id> deep link (Settings -> Manage device, admin
+     Devices page): jump straight to re-flashing that box. Server admins
+     can flash devices outside their /managed list, so an unknown id
+     still gets a row - the server decides whether the rekey is allowed. */
+  const target = /^[a-z0-9-]{1,31}$/.test(
+    new URLSearchParams(location.search).get("flash") || "")
+    ? new URLSearchParams(location.search).get("flash") : null;
+  let managed = [];
+  try { managed = await api("/managed"); }
+  catch (e) { /* resume list is optional */ }
+  if (target && !managed.some((d) => d.device_id === target))
+    managed.unshift({ device_id: target, name: target, username: null });
+  if (managed.length) {
+    $("resume-card").style.display = "block";
+    const list = $("resume-list");
+    list.innerHTML = "";
+    for (const d of managed) {
+      const row = document.createElement("div");
+      row.className = "devrow";
+      row.innerHTML =
+        `<div class="who"><b></b><br><span class="small dim"></span></div>
+         <input class="pin" maxlength="4" inputmode="numeric"
+                placeholder="new PIN" style="width:110px;margin:0">
+         <button class="btn">Flash</button>`;
+      row.querySelector("b").textContent = d.name;
+      row.querySelector("span").textContent =
+        (d.username ? "@" + d.username + " · " : "") + d.device_id;
+      row.querySelector("button").onclick = () => rekey(d, row);
+      list.appendChild(row);
+      if (d.device_id === target) {
+        row.style.outline = "2px solid var(--accent)";
+        row.style.borderRadius = "8px";
+        setTimeout(() => {
+          row.scrollIntoView({ block: "center" });
+          row.querySelector(".pin").focus();
+        }, 0);
       }
     }
-  } catch (e) { /* resume list is optional */ }
+  }
 }
 
 async function create() {
@@ -123,7 +140,7 @@ async function rekey(d, row) {
   try {
     const r = await apiJson(`/setup/${d.device_id}/rekey`,
                             { pin, server_url: $("nu-server").value.trim() });
-    startFlash(d.name, d.device_id, r.manifest, "re-err");
+    startFlash(r.name || d.name, d.device_id, r.manifest, "re-err");
   } catch (e) {
     $("re-err").textContent = friendly(e);
   }
@@ -422,9 +439,9 @@ async function pollOnline(deviceId) {
   const el = $("dn-online");
   for (let i = 0; i < 120; i++) {          // up to 10 min
     try {
-      const managed = await api("/managed");
-      const d = managed.find((x) => x.device_id === deviceId);
-      const ls = d && d.last_seen
+      // per-device endpoint: /managed misses admin-flashed boxes
+      const d = await api(`/setup/${deviceId}/online`);
+      const ls = d.last_seen
         ? Date.parse(d.last_seen.replace(" ", "T") + "Z") : 0;
       if (ls > flashStartMs) {
         el.textContent = "The box is online and connected to Pip ✓";
