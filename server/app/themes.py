@@ -38,7 +38,7 @@ THEMES = [
     {"name": "olivia",   "label": "Olivia",   "fg": "black"},
     {"name": "pink",     "label": "Pink",     "fg": "black"},
     {"name": "sea",      "label": "Sea",      "fg": "white"},
-    {"name": "benfica",  "label": "Benfica",  "fg": "white"},
+    {"name": "benfica",  "label": "Benfica",  "fg": "black"},
     {"name": "portugal", "label": "Portugal", "fg": "black"},
     {"name": "namibia",  "label": "Namibia",  "fg": "white"},
     {"name": "mario",    "label": "Mario",    "fg": "black"},
