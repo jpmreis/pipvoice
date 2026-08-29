@@ -12,6 +12,23 @@ write entries for humans.
 
 ## [Unreleased]
 
+### Added
+- The home screen's status bar shows a small clock, centered between
+  the settings gear and the wifi/battery readouts. It appears once the
+  box has learned the time and follows the active theme's text color.
+- The sleep screen is now a bedside clock. On a quiet night the time
+  wanders the panel in dim amber where the dot used to — a straight
+  jump every 10 seconds, no animation, at the same brightness as
+  before. When unheard mail is waiting, the wordmark's dot docks onto
+  the clock as its full stop ("02:47."), keeps its greeting bounce on
+  every move, and the panel steps up to a medium-high brightness so
+  the invitation carries across a room. During quiet hours the dot
+  stays away and the panel stays dim. A box that hasn't learned the
+  time yet keeps the old behavior: dot alone with mail, dark panel
+  without. The burn-in shaping carries over: amber only, a relocation
+  grid whose cells never share pixels, and nothing redrawn between
+  moves beyond the minute flip.
+
 ## [1.0.0] — 2026-08-23
 
 The first full version. Nothing new is switched on here — Pip has been

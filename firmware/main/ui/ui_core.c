@@ -2,6 +2,7 @@
 #include "ui_internal.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 ui_state_t g_ui;
 
@@ -19,9 +20,10 @@ bool ui_screen_is(ui_screen_id_t id) { return s_cur == id; }
 static void ui_tick_cb(lv_timer_t *t)
 {
     LV_UNUSED(t);
-    /* ambient is one icon on black by construction: neither the status bar
-     * nor the offline nag is on screen there, and the nag is home-only
-     * anyway. Both come back on the next tick after we leave. */
+    /* ambient is a clock on black by construction: neither the status bar
+     * nor the offline nag is on screen there (the clock runs its own
+     * timers, ui_ambient.c), and the nag is home-only anyway. Both come
+     * back on the next tick after we leave. */
     if (ui_screen_is(SCR_AMBIENT)) return;
     scr_home_update_status();
     ui_offline_eval();
@@ -111,12 +113,41 @@ void ui_splash_show(void)
     lv_refr_now(NULL);
 }
 
-/* ---------------- ambient ("mail waiting") screen ---------------- */
+/* ---------------- ambient (sleeping clock) screen ---------------- */
+
+/* Render "HH:MM" into buf; false (and an empty string) until SNTP has
+ * answered - anything older than 2023-11 means it hasn't (same convention
+ * as sync.c's clock_set). Callers that only want the verdict pass NULL. */
+#define UI_CLOCK_SANE_EPOCH 1700000000
+
+bool ui_clock_text(char *buf, size_t len)
+{
+    if (buf && len) buf[0] = '\0';
+    time_t now = time(NULL);
+    if (now < UI_CLOCK_SANE_EPOCH) return false;
+    if (buf && len) {
+        struct tm lt;
+        localtime_r(&now, &lt);
+        strftime(buf, len, "%H:%M", &lt);
+    }
+    return true;
+}
+
+bool ui_ambient_mail(void)
+{
+    /* DND holds mail on the server and the bedroom dark: no dot, no
+     * brightness step while quiet hours run */
+    return g_ui.unheard_count > 0 && !g_ui.dnd;
+}
+
 bool ui_ambient_wanted(void)
 {
     /* nav_locked_out(): a recording in progress and the provisioning QR are
-     * the two screens that must never be replaced by an icon */
-    return g_ui.unheard_count > 0 && !g_ui.dnd && !nav_locked_out();
+     * the two screens that must never be replaced by the sleep screen */
+    if (nav_locked_out()) return false;
+    /* the clock face needs a sane wall clock; the mail dot does not - a
+     * box that never learned the time keeps the old dot-or-dark behavior */
+    return ui_ambient_mail() || ui_clock_text(NULL, 0);
 }
 
 bool ui_ambient_enter(void)
@@ -197,6 +228,9 @@ void ui_set_inbox(const ui_message_t *list, uint8_t count)
         if (!g_ui.inbox[i].heard) g_ui.unheard_count++;
     scr_home_update_inbox();      /* pill only: don't reset a grid scroll */
     scr_inbox_refresh();
+    /* a sleeping box docks/undocks the clock's dot within a second;
+     * power.c retunes the brightness on its own 1 Hz ladder */
+    if (ui_screen_is(SCR_AMBIENT)) scr_ambient_refresh();
 }
 
 void ui_set_battery(uint8_t pct, bool charging, bool present)
@@ -221,6 +255,7 @@ void ui_set_dnd(bool on, uint8_t until_hour)
     g_ui.dnd_until_h = until_hour;
     scr_home_update_inbox();      /* pill only: don't reset a grid scroll */
     scr_inbox_refresh();
+    if (ui_screen_is(SCR_AMBIENT)) scr_ambient_refresh();
 }
 
 void ui_set_themes(const ui_theme_info_t *list, uint8_t count)

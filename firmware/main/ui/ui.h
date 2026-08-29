@@ -176,12 +176,14 @@ void ui_open_inbox(void);
  * (boot, or wake from full display-off). */
 void ui_splash_show(void);
 
-/* ---- ambient ("mail waiting") screen ----
- * A box that falls asleep with unheard mail shows the splash wordmark's
- * amber dot wandering on black instead of going fully dark; power.c owns
- * the brightness and the state ladder. All of these run in the LVGL
+/* ---- ambient (sleeping clock) screen ----
+ * A sleeping box shows a dim amber clock wandering on black instead of
+ * going fully dark; with unheard mail the splash wordmark's dot docks
+ * onto it as its full stop and the panel brightens. power.c owns the
+ * brightness and the state ladder. All of these run in the LVGL
  * task's world: call them from the LVGL task or under board_lock(). */
-bool ui_ambient_wanted(void);   /* unheard mail, not DND, nav not locked  */
+bool ui_ambient_wanted(void);   /* clock known or mail waits; nav not locked */
+bool ui_ambient_mail(void);     /* unheard mail, not DND: dot + brighter panel */
 bool ui_ambient_enter(void);    /* swap to it + start the shift timer;
                                    false = refused, caller should go dark */
 void ui_ambient_exit(void);     /* stop the timer, restore home; idempotent */

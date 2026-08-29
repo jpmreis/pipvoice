@@ -100,10 +100,12 @@ lv_obj_t *scr_splash_create(void);   void scr_splash_show(void);
 /* ambient touch-wake entry: dot starts at (x, y) and glides home into the
  * wordmark instead of dropping in from above */
 void scr_splash_show_from(int32_t from_x, int32_t from_y);
-/* ambient "you have mail" screen: show/hide only start and stop the
- * position-shift timer - ui_ambient_enter/exit do the screen swap */
+/* ambient sleeping-clock screen: show/hide only start and stop its
+ * timers - ui_ambient_enter/exit do the screen swap */
 lv_obj_t *scr_ambient_create(void); void scr_ambient_show(void);
 void scr_ambient_hide(void);
+/* mail state changed while the screen is up: dock/undock the dot */
+void scr_ambient_refresh(void);
 /* where the wandering dot rests right now (screen coords); freezes any
  * bounce so the splash handoff starts from the same pose */
 void scr_ambient_dot_pos(int32_t *x, int32_t *y);
@@ -150,6 +152,9 @@ lv_color_t ui_fg_color(bool dim);
 lv_opa_t   ui_fg_opa(bool dim);
 /* recolor a mk_header bar's back arrow + title for the active theme */
 void ui_fg_header(lv_obj_t *bar);
+/* "HH:MM" into buf (empty until SNTP answers); false = clock not sane
+ * yet. buf may be NULL for the verdict alone. (ui_core.c) */
+bool ui_clock_text(char *buf, size_t len);
 /* faded surfaces: rows/buttons keep contrast but let the bg peek through */
 #define UI_SURFACE_OPA (g_ui.theme_active ? LV_OPA_80 : LV_OPA_COVER)
 lv_obj_t *mk_button(lv_obj_t *parent, const char *txt, lv_color_t bg,

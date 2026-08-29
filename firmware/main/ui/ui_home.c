@@ -10,6 +10,7 @@ static lv_obj_t *s_wifi_waves;     /* strength glyph, shown when online */
 static lv_obj_t *s_wave[3];
 static lv_obj_t *s_wave_dot;
 static lv_obj_t *s_status_lbl;     /* battery, when present */
+static lv_obj_t *s_clock_lbl;      /* wall clock, once SNTP answers */
 static lv_obj_t *s_grid;           /* greeting + contact grid (scrolls) */
 static lv_obj_t *s_inbox_btn;
 static lv_obj_t *s_inbox_lbl;
@@ -151,6 +152,14 @@ lv_obj_t *scr_home_create(void)
     lv_obj_set_style_text_color(s_status_lbl, COL_TEXT_DIM, 0);
     lv_obj_align(s_status_lbl, LV_ALIGN_RIGHT_MID, -72, 6);
 
+    /* clock in the bar's dead center, same downward nudge as its
+     * neighbours; empty (invisible) until the box knows the time */
+    s_clock_lbl = lv_label_create(bar);
+    lv_obj_set_style_text_font(s_clock_lbl, FONT_BODY, 0);
+    lv_obj_set_style_text_color(s_clock_lbl, COL_TEXT_DIM, 0);
+    lv_label_set_text(s_clock_lbl, "");
+    lv_obj_align(s_clock_lbl, LV_ALIGN_CENTER, 0, 6);
+
     /* greeting + contact grid: the "Hello <owner>" heading is the grid's
      * first (full-width) row, so it scrolls away with the contacts. The
      * grid spans the full top of the screen with the bar floating
@@ -280,6 +289,7 @@ static void rebuild_contacts(void)
 static ui_wifi_state_t s_shown_wifi = (ui_wifi_state_t)-1;
 static uint8_t         s_shown_waves;
 static char            s_shown_bat[16];
+static char            s_shown_clock[8];
 static bool            s_status_dirty = true;   /* colors changed (theme) */
 
 /* status bar only: wifi/battery tick every few seconds - they must NOT
@@ -330,6 +340,15 @@ void scr_home_update_status(void)
         strlcpy(s_shown_bat, bat, sizeof(s_shown_bat));
         lv_label_set_text(s_status_lbl, bat);
     }
+
+    /* rides the same few-second tick as wifi/battery: the label repaints
+     * only when the minute string actually changes */
+    char clk[sizeof(s_shown_clock)];
+    ui_clock_text(clk, sizeof(clk));
+    if (s_status_dirty || strcmp(clk, s_shown_clock)) {
+        strlcpy(s_shown_clock, clk, sizeof(s_shown_clock));
+        lv_label_set_text(s_clock_lbl, clk);
+    }
     s_status_dirty = false;
 }
 
@@ -368,6 +387,7 @@ void scr_home_apply_theme(void)
     ui_fg_label(s_gear_lbl, true);
     ui_fg_label(s_wifi_lbl, true);
     ui_fg_label(s_status_lbl, true);
+    ui_fg_label(s_clock_lbl, true);
     s_status_dirty = true;           /* arc colors are set on next update */
     scr_home_refresh();              /* rebuilds greeting + contact names */
 }

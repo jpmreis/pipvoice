@@ -13,23 +13,28 @@
 #define OFF_AFTER_MS      (45 * 1000)
 #define BATTERY_POLL_MS   (30 * 1000)
 #define DIM_LEVEL         40
-/* Ambient: medium, ~35% of full drive. One compile-time constant so it can
- * be tuned on the bench; g_cfg.brightness stays the "awake" level only.
- * Raising it means shortening AMBIENT_SHIFT_MS (ui_ambient.c) to keep the
- * per-pixel dose where the burn-in argument put it. */
-#define AMBIENT_LEVEL     90
+/* Ambient runs at two levels, picked by the mail state (ui_ambient_mail):
+ * a quiet night's clock keeps the old medium, ~35% of full drive; unheard
+ * mail steps up to medium-high so the waiting dot carries across a room.
+ * Compile-time constants so they can be tuned on the bench;
+ * g_cfg.brightness stays the "awake" level only. */
+#define AMBIENT_LEVEL       90
+#define AMBIENT_MAIL_LEVEL  150
 
-/* Sleeping with unheard mail lands on PWR_AMBIENT instead of PWR_OFF: a
- * black panel with one small icon rather than a dark one. It is a state of
- * its own and not just "PWR_OFF with the backlight up" because PWR_OFF
- * leaves the whole home screen rendered underneath - contact grid, inbox
- * pill, badge - and lighting that dimly is the worst case for both burn-in
- * and legibility. */
+/* Sleeping lands on PWR_AMBIENT instead of PWR_OFF: a black panel with a
+ * dim clock (plus the mail dot when something waits) rather than a dark
+ * one. It is a state of its own and not just "PWR_OFF with the backlight
+ * up" because PWR_OFF leaves the whole home screen rendered underneath -
+ * contact grid, inbox pill, badge - and lighting that dimly is the worst
+ * case for both burn-in and legibility. PWR_OFF remains for a box that
+ * can't show the clock yet (no SNTP) and has no mail, and as apply()'s
+ * fallback when the ambient enter is refused. */
 typedef enum { PWR_FULL, PWR_DIM, PWR_AMBIENT, PWR_OFF } pwr_state_t;
 
 static battery_cb_t s_bat_cb;
 static pwr_state_t  s_state = PWR_FULL;
 static uint8_t      s_full_brightness = 200;
+static uint8_t      s_ambient_level = AMBIENT_LEVEL;   /* current mood */
 static volatile bool s_hold;
 static lv_obj_t    *s_shield;   /* topmost transparent layer while dimmed/off:
                                    the wake-up tap must not reach the UI */
@@ -72,7 +77,7 @@ static void shield_pressed(lv_event_t *e)
              * brightness eases up (we are the LVGL task with the lock
              * held; no board_lock() needed) */
             ui_ambient_wake_to_splash();
-            brightness_ramp(AMBIENT_LEVEL, s_full_brightness);
+            brightness_ramp(s_ambient_level, s_full_brightness);
         } else {
             ui_splash_show();        /* full sleep gets the hello again;
                                         paints while the panel is dark so
@@ -138,7 +143,7 @@ static void apply(pwr_state_t st)
     switch (st) {
         case PWR_FULL:    board_set_brightness(s_full_brightness); break;
         case PWR_DIM:     board_set_brightness(DIM_LEVEL);         break;
-        case PWR_AMBIENT: board_set_brightness(AMBIENT_LEVEL);     break;
+        case PWR_AMBIENT: board_set_brightness(s_ambient_level);   break;
         case PWR_OFF:     board_set_brightness(0);                 break;
     }
     if (board_lock(50)) {
@@ -159,16 +164,26 @@ static void power_task(void *arg)
          * only starts once the recording/playback actually ends. */
         uint32_t idle = 0;
         bool     want_ambient = false;
+        bool     ambient_mail = false;
         if (board_lock(50)) {
             if (s_hold) lv_display_trigger_activity(NULL);
             idle = lv_display_get_inactive_time(NULL);
             want_ambient = ui_ambient_wanted();
+            ambient_mail = ui_ambient_mail();
             board_unlock();
         }
-        /* Re-decided every second, so a message arriving while the panel is
-         * fully off lights the icon within 1 s, and hearing the last one
-         * drops ambient back to off just as quickly. */
-        if (idle > OFF_AFTER_MS)      apply(want_ambient ? PWR_AMBIENT : PWR_OFF);
+        /* Re-decided every second, so a message arriving while the box
+         * sleeps brightens the clock and docks the dot within 1 s (the
+         * dot itself is scr_ambient_refresh's job, from ui_set_inbox),
+         * and hearing the last one settles it back down just as quickly. */
+        if (idle > OFF_AFTER_MS) {
+            uint8_t alevel = ambient_mail ? AMBIENT_MAIL_LEVEL : AMBIENT_LEVEL;
+            if (want_ambient && s_state == PWR_AMBIENT &&
+                alevel != s_ambient_level)
+                board_set_brightness(alevel);   /* mood change, same state */
+            s_ambient_level = alevel;           /* what apply() will set   */
+            apply(want_ambient ? PWR_AMBIENT : PWR_OFF);
+        }
         else if (idle > DIM_AFTER_MS) apply(PWR_DIM);
         else                          apply(PWR_FULL);
 
