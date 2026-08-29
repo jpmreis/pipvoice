@@ -12,6 +12,11 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-08-29
+
+Pip learns to tell the time: a clock in the home status bar, and the
+sleep screen grows from a wandering dot into a wandering bedside clock.
+
 ### Added
 - The home screen's status bar shows a small clock, centered between
   the settings gear and the wifi/battery readouts. It appears once the
