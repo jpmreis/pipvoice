@@ -1,6 +1,8 @@
 # Pip — working notes for Claude
 
-Family voice-message system, **in production for daily family use**. One
+Family voice-message system, **in production for daily family use**. The
+production server (pipvoice.com) **auto-deploys from `main`** — treat
+every push to main as a production deploy of the server. One
 version number for everything: `PROJECT_VER` in `firmware/CMakeLists.txt`.
 Read the READMEs first (root, `firmware/`, `server/SETUP*.md`,
 `docs/pwa-spec.md`); this file holds only what the docs can't show.
