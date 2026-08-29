@@ -41,6 +41,7 @@ THEMES = [
     {"name": "benfica",  "label": "Benfica",  "fg": "white"},
     {"name": "portugal", "label": "Portugal", "fg": "black"},
     {"name": "namibia",  "label": "Namibia",  "fg": "white"},
+    {"name": "mario",    "label": "Mario",    "fg": "black"},
 ]
 
 
