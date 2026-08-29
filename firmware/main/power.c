@@ -202,7 +202,12 @@ void power_init(battery_cb_t bat_cb)
     s_bat_cb = bat_cb;
     s_full_brightness = g_cfg.brightness;
     board_set_brightness(s_full_brightness);
-    xTaskCreate(power_task, "power", 4096, NULL, 2, NULL);
+    /* 8 KB, not 4: entering ambient paints the sleep screen with
+     * lv_refr_now() on THIS task's stack (apply -> ui_ambient_enter), and
+     * since the clock that render rasterizes a FONT_BIG label rather than
+     * just the 14 px dot - the deeper label draw path overflowed the old
+     * 4 KB stack (canary panic, so the box rebooted at the sleep timer). */
+    xTaskCreate(power_task, "power", 8192, NULL, 2, NULL);
 }
 
 void power_user_activity(void)

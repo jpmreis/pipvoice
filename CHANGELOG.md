@@ -12,6 +12,15 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-08-29
+
+### Fixed
+- 1.1.0 boxes rebooted the moment the sleep timer fired. Entering the
+  sleep screen paints it with `lv_refr_now()` on the power task's own
+  stack, and the new clock made that render rasterize a 40 px label
+  where 1.0.0 drew a 14 px dot — the deeper draw path overflowed the
+  task's 4 KB stack (canary panic). The power task now runs on 8 KB.
+
 ## [1.1.0] — 2026-08-29
 
 Pip learns to tell the time: a clock in the home status bar, and the

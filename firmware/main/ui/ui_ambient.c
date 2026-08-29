@@ -235,6 +235,8 @@ lv_obj_t *scr_ambient_create(void)
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_unit, 3, 0);
     lv_obj_add_flag(s_unit, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    lv_obj_clear_flag(s_unit, LV_OBJ_FLAG_SCROLLABLE);   /* the dot's hops
+                                          must never scroll their own box */
 
     /* amber, never COL_TEXT white: 0xFFB300 leaves the blue channel dark
      * and blue emitters age fastest */
