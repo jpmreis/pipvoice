@@ -5,16 +5,19 @@
 #include "storage.h"
 #include "theme.h"
 #include "ui.h"
+#include "voice.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include <dirent.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 static const char *TAG = "sync";
 
@@ -87,6 +90,81 @@ static void refresh_contacts(void)
         contacts_cache_save();
         if (s_ev.contacts_changed) s_ev.contacts_changed();
         ESP_LOGI(TAG, "contacts: %u", n);
+    }
+}
+
+/* ---------------- per-device config + voice prompts ----------------
+ * Fetched alongside the contacts refresh (same 24 h gate, same forced
+ * kick via MQTT {"event":"voice"} -> sync_contacts_kick). The flag is
+ * persisted to NVS so an offline reboot keeps listening; the prompt
+ * manifest lives only here - the files themselves persist on flash and
+ * are reconciled against the manifest each pass. */
+#define VOICE_MAX_PROMPTS 20      /* 4 canned + one per contact (12) */
+static http_prompt_t s_prompts[VOICE_MAX_PROMPTS];
+static uint8_t       s_prompt_count;
+static bool          s_have_manifest;
+
+static void refresh_device_cfg(void)
+{
+    bool ven = false;
+    static http_prompt_t tmp[VOICE_MAX_PROMPTS];
+    uint8_t n = 0;
+    if (!http_get_device_config(&ven, tmp, VOICE_MAX_PROMPTS, &n)) return;
+    memcpy(s_prompts, tmp, n * sizeof(http_prompt_t));
+    s_prompt_count = n;
+    s_have_manifest = true;
+    if (ven != g_cfg.voice_enabled) {
+        config_save_voice(ven);
+        voice_set_enabled(ven);
+    }
+}
+
+static void prompt_file(char *buf, size_t cap, const http_prompt_t *p)
+{
+    snprintf(buf, cap, PROMPTS_DIR "/%.47s-%.11s.vmsg", p->key, p->ver);
+}
+
+/* mirror the manifest: fetch missing clips, drop stale ones (renamed
+ * contact, new TTS voice, or voice control switched off entirely).
+ * Same shape as theme_thumbs_sync; runs in this task (one-TLS rule). */
+static void prompts_sync(void)
+{
+    if (!s_have_manifest) return;
+    char path[128];
+
+    for (uint8_t i = 0; i < s_prompt_count; i++) {
+        struct stat st;
+        prompt_file(path, sizeof(path), &s_prompts[i]);
+        if (stat(path, &st) == 0 && st.st_size > 0) continue;
+        if (!http_download_prompt(s_prompts[i].key, s_prompts[i].ver,
+                                  PROMPTS_DIR "/tmp.bin"))
+            continue;                    /* retry on a later sync pass */
+        if (stat(PROMPTS_DIR "/tmp.bin", &st) != 0 || st.st_size == 0) {
+            unlink(PROMPTS_DIR "/tmp.bin");
+            continue;
+        }
+        rename(PROMPTS_DIR "/tmp.bin", path);
+        ESP_LOGI(TAG, "prompt %s-%s cached", s_prompts[i].key,
+                 s_prompts[i].ver);
+    }
+
+    DIR *d = opendir(PROMPTS_DIR);
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d)) != NULL) {
+            if (e->d_name[0] == '.') continue;
+            bool wanted = false;
+            for (uint8_t i = 0; i < s_prompt_count && !wanted; i++) {
+                prompt_file(path, sizeof(path), &s_prompts[i]);
+                wanted = !strcmp(path + sizeof(PROMPTS_DIR), e->d_name);
+            }
+            if (!wanted) {
+                snprintf(path, sizeof(path), PROMPTS_DIR "/%.60s",
+                         e->d_name);
+                unlink(path);
+            }
+        }
+        closedir(d);
     }
 }
 
@@ -496,6 +574,7 @@ static void sync_task(void *arg)
             s_contacts_force = false;
             refresh_contacts();
             refresh_themes();
+            refresh_device_cfg();
             last_contacts = now;
         }
         drain_outbox();
@@ -515,6 +594,7 @@ static void sync_task(void *arg)
         if (theme_thumbs_sync(s_themes, s_theme_count) &&
             s_ev.themes_changed)
             s_ev.themes_changed();
+        prompts_sync();   /* voice clips: cheap stats when current */
     }
 }
 

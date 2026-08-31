@@ -14,6 +14,7 @@
 #include "sync.h"
 #include "theme.h"
 #include "ui.h"
+#include "voice.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -85,6 +86,16 @@ static bool cb_record_send(void)
     sync_kick();
     audio_play_chime(CHIME_SENT);
     return true;
+}
+
+/* voice-flow twins of the record callbacks: same recipient/presence
+ * bookkeeping, but the capture auto-stops on trailing silence */
+static void cb_voice_record_start(const char *contact_id)
+{
+    strlcpy(s_rec_recipient, contact_id, sizeof(s_rec_recipient));
+    power_hold(true);
+    audio_record_start_vad();
+    net_mqtt_publish_presence(s_rec_recipient, true);
 }
 
 static void cb_record_cancel(void)
@@ -200,6 +211,13 @@ static void ev_record_done(uint16_t dur)
 {
     s_rec_duration = dur;
     power_hold(false);
+    net_mqtt_publish_presence(s_rec_recipient, false);  /* harmless dup
+                                after a manual stop; ends the VAD case */
+    if (voice_session_active()) {       /* voice flow owns this recording:
+                                           no record-screen side effects */
+        voice_on_record_done(dur);
+        return;
+    }
     if (dur == 0) UI_LOCKED(ui_flash_error("Recording failed"));
     else UI_LOCKED(ui_record_limit_reached());  /* no-op unless limit hit */
 }
@@ -315,6 +333,10 @@ static void ev_mqtt_notify(const char *payload)
     if (!strcmp(event, "firmware")) {
         ota_kick();
     } else if (!strcmp(event, "contacts")) {
+        sync_contacts_kick();
+    } else if (!strcmp(event, "voice")) {
+        /* admin toggled voice control / prompts re-rendered: the flag
+         * and manifest ride the contacts refresh (sync.c) */
         sync_contacts_kick();
     } else if (!strcmp(event, "recording")) {
         const cJSON *fr = cJSON_GetObjectItem(root, "from");
@@ -455,9 +477,23 @@ void app_main(void)
         .record_done = ev_record_done,
         .play_progress = ev_play_progress,
         .play_done = ev_play_done,
+        .voice_hits = voice_on_hits,       /* audio task -> voice flow  */
+        .prompt_done = voice_on_prompt_done,
     };
     audio_init(&audio_ev);
     HEAPLOG("audio");
+
+    static const voice_app_t voice_app = {
+        .record_start = cb_voice_record_start,
+        .record_send = cb_record_send,
+        .record_cancel = cb_record_cancel,
+        .mark_heard = cb_heard,
+    };
+    voice_init(&voice_app);
+    if (g_cfg.voice_enabled)   /* server flag cached in NVS: listen from
+                                  boot, refreshed on the next sync */
+        voice_set_enabled(true);
+    HEAPLOG("voice");
 
     static const sync_events_t sync_ev = {
         .inbox_changed = ev_inbox_changed,

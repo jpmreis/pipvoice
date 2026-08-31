@@ -60,6 +60,13 @@ main/
   sync.c/.h         outbox drainer + inbox fetcher (offline-first,
                     contacts cached to flash, theme thumbs to LittleFS)
   theme.c/.h        background themes: versioned download, PSRAM decode
+  voice.c/.h        voice-control flow (accessibility): wake -> offer new
+                    messages -> cycle contacts -> confirm -> record/send;
+                    server-set flag, spoken prompts from /data/prompts
+  voice_infer.cc/.h microWakeWord streaming inference (esp-tflite-micro +
+                    micro-speech frontend), energy VAD; audio-task only
+  voice_model_*.c   embedded wake/"yes" models - regenerate with
+                    tools/wakeword/tflite_to_c.py, never edit
   provisioning.c/.h SoftAP + DNS hijack + captive portal (portal.html),
                     reboots after 10 idle minutes (portal activity re-arms)
   power.c/.h        inactivity dim/off, battery polling
@@ -69,7 +76,8 @@ main/
   lv_mem_psram.c    LVGL heap in PSRAM
   ui/               LVGL 9 screens: home, record, inbox, playback,
                     reactions, pinpad, settings, theme picker, wifi setup,
-                    offline nag (home-only overlay after 60 s without WiFi)
+                    voice status, offline nag (home-only overlay after
+                    60 s without WiFi)
 ```
 
 Tasks: BSP LVGL task · audio (prio 6, static stack) · sync (4, core 0) ·

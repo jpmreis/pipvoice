@@ -64,6 +64,7 @@ void ui_init(const ui_callbacks_t *cbs)
     s_screens[SCR_WIFI_SETUP] = scr_wifi_setup_create();
     s_screens[SCR_SPLASH]     = scr_splash_create();
     s_screens[SCR_AMBIENT]    = scr_ambient_create();
+    s_screens[SCR_VOICE]      = scr_voice_create();
 
     scr_home_refresh();
     lv_screen_load(s_screens[SCR_HOME]);
@@ -71,7 +72,8 @@ void ui_init(const ui_callbacks_t *cbs)
 }
 
 /* ---------------- physical-button navigation ---------------- */
-static bool nav_locked_out(void)
+/* shared with ui_voice.c: the voice flow must not yank these either */
+bool nav_locked_out(void)
 {
     /* don't yank an active recording or the provisioning portal */
     lv_obj_t *act = lv_screen_active();

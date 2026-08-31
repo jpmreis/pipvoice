@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS devices (
     token_hash TEXT NOT NULL,
     mqtt_password TEXT NOT NULL,
     created TEXT NOT NULL DEFAULT (datetime('now')),
-    last_seen TEXT
+    last_seen TEXT,
+    voice INTEGER NOT NULL DEFAULT 0    -- accessibility voice control
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -108,6 +109,8 @@ MIGRATIONS = [
     "ALTER TABLE devices ADD COLUMN admin_id INTEGER REFERENCES users(id)",
     # when the first client acked; drives delete-on-delivery (cleanup.py)
     "ALTER TABLE messages ADD COLUMN delivered_at TEXT",
+    # accessibility: hands-free voice control on this box (admin toggle)
+    "ALTER TABLE devices ADD COLUMN voice INTEGER NOT NULL DEFAULT 0",
 ]
 
 

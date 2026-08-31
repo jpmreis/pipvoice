@@ -12,6 +12,42 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-31
+
+Voice control: a hands-free accessibility mode, built for a family
+member who can talk to their Pip but can't reliably press it. Off
+everywhere by default — nothing changes on a box until its "Voice
+control" toggle is switched on.
+
+### Added
+- Say the wake word and the box takes it from there: it offers to play
+  any waiting messages, then cycles through the contacts by name —
+  "Send a message to Mom?" — and a spoken "yes" (or, until the "yes"
+  model is trained, any reply at all) confirms. Recording stops itself
+  when the speaker goes quiet, asks "Send it?", and the message leaves
+  on the same path a button-press send would take. Every question is
+  also on the screen in big type, so a helper can follow along.
+- Wake-word detection runs entirely on the box (microWakeWord streaming
+  models on TFLite-Micro, inside the existing audio task). This release
+  ships the pretrained "Hey Jarvis" model as a stand-in while our own
+  "Hey Pip" is trained; swapping the word is a model regeneration, not
+  a firmware change (`tools/wakeword/`).
+- The questions are spoken in a real voice: the server renders prompt
+  clips with a local TTS (piper) — one per phrase plus one per contact
+  name — and boxes sync them like theme assets, so a renamed contact
+  re-renders and re-downloads by itself.
+- The toggle lives in two places: the admin Devices page, and the
+  device admin's own PWA card (Settings → Manage device). It reaches
+  the box within seconds when it's online, at next sync when not, and
+  survives offline reboots.
+- First server-delivered per-device setting (`GET /v1/device`) — the
+  narrow first slice of the config-push idea from the backlog.
+
+### Fixed
+- The server smoke test had been quietly exiting early since the
+  waitlist landed: a strict equality check on `/v1/auth/methods` failed
+  on the new key and took the last eight assertions with it.
+
 ## [1.1.1] — 2026-08-29
 
 ### Fixed
@@ -42,7 +78,6 @@ sleep screen grows from a wandering dot into a wandering bedside clock.
   without. The burn-in shaping carries over: amber only, a relocation
   grid whose cells never share pixels, and nothing redrawn between
   moves beyond the minute flip.
-
 ## [1.0.0] — 2026-08-23
 
 The first full version. Nothing new is switched on here — Pip has been

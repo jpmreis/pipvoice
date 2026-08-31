@@ -165,6 +165,14 @@ void ui_open_wifi_setup(void);       /* start setup mode + QR screen (also
 void ui_open_record_recent(void);    /* record screen, most recent contact */
 void ui_open_inbox(void);
 
+/* ---- voice-control status screen (call under the LVGL lock) ----
+ * Big-type display of what the voice flow is asking; driven by voice.c.
+ * show() navigates to the screen unless the record/wifi screens hold the
+ * nav lock (the flow still runs; the question just isn't on the panel);
+ * close() returns home only if the voice screen is the one showing. */
+void ui_voice_show(const char *line1, const char *line2);
+void ui_voice_close(void);
+
 /* Length of the boot greeting. app_main keeps the heavy parts of boot
  * (flash reads, network bring-up) out of this window: the animation
  * shares a CPU and the LVGL lock with whatever else is running. */

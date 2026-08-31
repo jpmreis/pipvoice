@@ -25,6 +25,8 @@
 #define THUMBS_DIR      STORAGE_ROOT "/thumbs"        /* picker thumbnails,
                                        one <name>-<ver>.bin per theme      */
 #define REACTIONS_CACHE STORAGE_ROOT "/reactions.bin" /* unseen, as sender */
+#define PROMPTS_DIR     STORAGE_ROOT "/prompts"       /* voice-control TTS
+                                       clips, one <key>-<ver>.vmsg each   */
 
 void storage_init(void);
 

@@ -394,6 +394,49 @@ bool http_get_reactions(ui_reaction_t *out, uint8_t cap, uint8_t *count)
     return true;
 }
 
+/* ---------------- per-device config (voice control) ---------------- */
+bool http_get_device_config(bool *voice_enabled, http_prompt_t *out,
+                            uint8_t cap, uint8_t *count)
+{
+    esp_http_client_handle_t c = client_new("/device", NULL, HTTP_METHOD_GET);
+    if (!c) return false;
+    static char body[4096];
+    int status = perform_read(c, body, sizeof(body));
+    esp_http_client_cleanup(c);
+    if (status != 200) {
+        /* old server (404) or trouble: keep current state */
+        if (status != 404) ESP_LOGW(TAG, "device config -> %d", status);
+        return false;
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) return false;
+    *voice_enabled = cJSON_IsTrue(cJSON_GetObjectItem(root, "voice"));
+    uint8_t n = 0;
+    const cJSON *list = cJSON_GetObjectItem(root, "prompts");
+    const cJSON *item;
+    cJSON_ArrayForEach(item, list) {
+        if (n >= cap) break;
+        cJSON *key = cJSON_GetObjectItem(item, "key");
+        cJSON *ver = cJSON_GetObjectItem(item, "ver");
+        if (!cJSON_IsString(key) || !cJSON_IsString(ver)) continue;
+        strlcpy(out[n].key, key->valuestring, sizeof(out[n].key));
+        strlcpy(out[n].ver, ver->valuestring, sizeof(out[n].ver));
+        n++;
+    }
+    cJSON_Delete(root);
+    *count = n;
+    return true;
+}
+
+bool http_download_prompt(const char *key, const char *ver,
+                          const char *dest_path)
+{
+    char path[96];
+    snprintf(path, sizeof(path), "/voice/%s.vmsg?v=%s", key, ver);
+    return download_to_file(path, dest_path);
+}
+
 /* ---------------- timezone from public IP ---------------- */
 bool http_set_tz_from_ip(void)
 {

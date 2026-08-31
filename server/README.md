@@ -41,6 +41,9 @@ app/
                 orphaned-audio sweep, reminder emails
   themes.py     ffmpeg-rendered background variants (device .bin RGB565,
                 thumb .bin, web .jpg), content-hash versioned
+  voice.py      spoken prompts for device voice control (accessibility):
+                piper/espeak TTS -> .vmsg clips, content-hash versioned
+                like themes; per-device flag lives on devices.voice
   vmsg.py       .vmsg container (mirrors firmware opus_file.c): browser
                 audio -> ffmpeg -> opuslib -> VMSG; VMSG -> WAV out
   templates/    admin pages (Jinja2)
@@ -53,7 +56,7 @@ app/
 
 `pip.db` (SQLite) · `audio/` (.vmsg blobs) · `firmware/` (fetched or
 uploaded app .bins + web-flash bundle files) · `themes/` (rendered
-variants) · `vapid_private.pem`
+variants) · `prompts/` (voice-control TTS clips) · `vapid_private.pem`
 (auto-generated; regenerating invalidates every push subscription).
 
 ## Design constraints worth knowing

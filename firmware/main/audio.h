@@ -10,6 +10,11 @@ typedef struct {
     void (*record_done)(uint16_t duration_s);     /* stopped or limit hit  */
     void (*play_progress)(uint16_t pos_s, uint16_t total_s);
     void (*play_done)(void);
+    /* voice control (both fired from the audio task, may be NULL):
+     * detections while listening (VOICE_HIT_* in voice_infer.h), and
+     * completion of an audio_play_prompt() playback */
+    void (*voice_hits)(uint32_t mask);
+    void (*prompt_done)(void);
 } audio_events_t;
 
 void audio_init(const audio_events_t *ev);
@@ -29,6 +34,20 @@ bool audio_wait_record_done(uint32_t timeout_ms);
 void audio_play_file(const char *path);
 void audio_stop(void);
 
-/* two-pip brand sound; the PWA synthesizes the same motif (app.js) */
-typedef enum { CHIME_RECEIVED, CHIME_SENT } chime_t;
+/* two-pip brand sound; the PWA synthesizes the same motif (app.js).
+ * CHIME_PROMPT is the voice flow's single-note cue (box-only). */
+typedef enum { CHIME_RECEIVED, CHIME_SENT, CHIME_PROMPT } chime_t;
 void audio_play_chime(chime_t which);
+
+/* ---- voice control (wake-word) ----
+ * While on, the audio task holds the mic open between commands and
+ * streams it through voice_infer; commands (play/record/chime) preempt
+ * within 10 ms and listening resumes when they finish. */
+void audio_voice_listen(bool on);
+/* Play a spoken prompt (or an inbox message inside the voice flow):
+ * completion fires events.prompt_done - even for an unopenable path -
+ * and no play_progress ticks are emitted. */
+void audio_play_prompt(const char *path);
+/* Start a recording that auto-stops on trailing silence (voice flow);
+ * reported through record_done like any other recording. */
+void audio_record_start_vad(void);

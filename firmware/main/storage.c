@@ -63,6 +63,7 @@ static void identity_check(void)
         wipe_dir(REACT_DIR);
         wipe_dir(RSEEN_DIR);
         wipe_dir(THUMBS_DIR);       /* thumbs come from the old server */
+        wipe_dir(PROMPTS_DIR);      /* voice prompts name old contacts */
         unlink(CONTACTS_CACHE);
         unlink(REACTIONS_CACHE);
     }
@@ -88,6 +89,7 @@ void storage_init(void)
     mkdir(REACT_DIR, 0777);
     mkdir(RSEEN_DIR, 0777);
     mkdir(THUMBS_DIR, 0777);
+    mkdir(PROMPTS_DIR, 0777);
     identity_check();                     /* config_load() ran before us */
 
     size_t total = 0, used = 0;

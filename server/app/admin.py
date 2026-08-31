@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from urllib.parse import quote
 
-from . import api, db, emails, mqtt, provision, release
+from . import api, db, emails, mqtt, provision, release, voice
 from .auth import (LOCAL_AUTH, AdminDep, Identity, client_ip, create_session,
                    hash_password, issue_login_code, login_blocked,
                    login_failed, login_succeeded, redeem_login_code,
@@ -285,6 +285,7 @@ async def perms_save(request: Request, ident: Identity = AdminDep):
     # boxes refetch contacts right away; NOT retained (a retained message
     # here would replace the retained firmware notify on the same topic)
     mqtt.notify_all('{"event":"contacts"}', retain=False)
+    voice.ensure_all()   # voice boxes may need clips for new contacts
     return RedirectResponse("/admin/perms", status_code=303)
 
 
@@ -307,6 +308,24 @@ def devices_set_admin(device_id: str, ident: Identity = AdminDep,
     with db.conn() as c:
         c.execute("UPDATE devices SET admin_id=? WHERE id=?",
                   (int(admin_id) if admin_id else None, device_id))
+    return RedirectResponse("/admin/devices", status_code=303)
+
+
+@router.post("/devices/{device_id}/voice")
+def devices_voice(device_id: str, ident: Identity = AdminDep,
+                  on: str = Form("")):
+    """Accessibility: hands-free voice control ("Hey Pip") on this box.
+    The box learns within seconds (non-retained notify -> config fetch);
+    spoken prompts render in the background on first enable."""
+    with db.conn() as c:
+        dev = db.one(c, "SELECT user_id FROM devices WHERE id=?", (device_id,))
+        if not dev:
+            raise HTTPException(404, "no such device")
+        c.execute("UPDATE devices SET voice=? WHERE id=?",
+                  (1 if on else 0, device_id))
+    if on:
+        voice.ensure_user(dev["user_id"])
+    mqtt.notify_user(dev["user_id"], '{"event":"voice"}')
     return RedirectResponse("/admin/devices", status_code=303)
 
 

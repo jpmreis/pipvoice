@@ -1,12 +1,18 @@
 {% extends "base.html" %}{% block content %}
 <h1>Devices</h1>
 <div class="card"><table>
-<tr><th>Device</th><th>Owner</th><th>Device admin</th><th>Created</th><th>Last seen</th><th></th><th></th></tr>
+<tr><th>Device</th><th>Owner</th><th>Device admin</th><th>Voice control</th><th>Created</th><th>Last seen</th><th></th><th></th></tr>
 {% for d in devices %}<tr><td>{{ d.id }}</td><td>{{ d.display_name }}</td>
 <td><form method="post" action="/admin/devices/{{ d.id }}/admin" style="display:flex;gap:6px;align-items:center">
 <select name="admin_id"><option value="">&mdash; none &mdash;</option>{% for u in users %}
 <option value="{{ u.id }}" {{ "selected" if u.id == d.admin_id }}>{{ u.display_name }}</option>{% endfor %}</select>
 <button>Set</button></form></td>
+<td><form method="post" action="/admin/devices/{{ d.id }}/voice">
+{% if d.voice %}<input type="hidden" name="on" value="">
+<button title="Hands-free accessibility mode is ON">On</button>
+{% else %}<input type="hidden" name="on" value="1">
+<button class="muted" title="Enable hands-free accessibility mode">Off</button>{% endif %}
+</form></td>
 <td class="muted">{{ d.created[:10] }}</td>
 <td class="muted">{{ d.last_seen or "never" }}</td>
 <td><a href="/app/setup.html?flash={{ d.id }}">Web flash</a></td>
@@ -17,7 +23,10 @@ onsubmit="return confirm('Revoke {{ d.id }}? Its token stops working immediately
 <p class="muted">The device admin manages this device's contact list from
 their own PWA (Settings &rarr; Manage device). Web flash opens the browser
 flasher (Chrome/Edge + USB) and issues the box <b>fresh credentials</b> -
-it is offline until the flash completes.</p>
+it is offline until the flash completes. Voice control is the hands-free
+accessibility mode ("Hey Pip"): the box wakes on the phrase, offers new
+messages, and cycles contacts for a spoken "yes" - needs firmware with
+voice support.</p>
 <div class="card"><h2>Provision new device</h2>
 <form method="post">
 <input name="device_id" placeholder="device id, e.g. pip-ella-01" required>

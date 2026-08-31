@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 import asyncio
 
-from . import api, db, mqtt, presence, themes
+from . import api, db, mqtt, presence, themes, voice
 from .api import router as api_router
 from .admin import router as admin_router
 from .cleanup import cleanup_loop
@@ -45,6 +45,11 @@ app.mount("/app", StaticFiles(
 async def _start_cleanup():
     asyncio.create_task(cleanup_loop())
     presence.start_subscriber()
+    # voice-control prompt clips: re-render whatever a deploy changed
+    # (phrase text, TTS voice) for every voice-enabled box. Runs in its
+    # own thread (voice.ensure_user) - unlike themes.render_all above,
+    # TTS is too slow for the startup path.
+    voice.ensure_all()
     # refresh the broker ACL so already-provisioned devices gain their
     # presence/<id> write line without re-provisioning; best-effort like
     # everything mosquitto (dev machines have no ACL dir)

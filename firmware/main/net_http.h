@@ -38,3 +38,18 @@ bool http_get_reactions(ui_reaction_t *out, uint8_t cap, uint8_t *count);
 /* geolocate our public IP and set the TZ env accordingly; after this,
  * localtime() renders wall-clock time. Retry until it returns true. */
 bool http_set_tz_from_ip(void);
+
+/* ---- per-device config (voice control) ---- */
+#define HTTP_PROMPT_KEY_LEN 48   /* "ask_send-" + username              */
+typedef struct {
+    char key[HTTP_PROMPT_KEY_LEN];
+    char ver[UI_THEME_VER_LEN];  /* 8-hex content hash, like themes     */
+} http_prompt_t;
+
+/* GET /device: the voice-control flag plus the manifest of spoken
+ * prompts this device should hold. Old servers 404 -> returns false and
+ * nothing changes (fail-safe: the box keeps its NVS-cached flag). */
+bool http_get_device_config(bool *voice_enabled, http_prompt_t *out,
+                            uint8_t cap, uint8_t *count);
+bool http_download_prompt(const char *key, const char *ver,
+                          const char *dest_path);

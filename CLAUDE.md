@@ -70,6 +70,15 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
   ADC clipping.
 - Buttons: BOOT (top) = record-to-recent; AXP2101 power key (bottom) =
   inbox; key events are the **lower** nibble of INTSTS2.
+- Voice control (accessibility): wake/"yes" models are embedded C arrays
+  — regenerate via `tools/wakeword/tflite_to_c.py`, never hand-edit; the
+  wake-word listener lives INSIDE the audio task (one ES8311, one I2S
+  duplex pair — mic and speaker must never be open together, and a
+  second TLS/task would break the established rules). Prompt keys
+  (`ask_play`, `ask_confirm`, `cancelled`, `ask_send-<username>`) are
+  firmware API shared with server voice.py — rename in both or clips
+  stop resolving. Wake model is a hey_jarvis stand-in until "hey pip"
+  is trained (tools/wakeword/README.md).
 - Timezone comes from `ip-api.com/json` over plain http after WiFi connect
   (worldtimeapi silently ignores http). POSIX TZ sign is inverted and the
   zone name needs ≥3 chars ("LOC-1:00" works, "LT-1" silently keeps UTC).
@@ -88,9 +97,9 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
 - Device `.meta` files are 8 lines (line 6 sender_id, 7 UTC ts, 8 own
   reaction).
 - MQTT notify topic is shared: the firmware-update notify is **retained**
-  (offline boxes OTA on reconnect); the `{"event":"contacts"}` notify
-  **must stay non-retained** or it replaces the retained firmware notify
-  and breaks OTA-on-reconnect.
+  (offline boxes OTA on reconnect); the `{"event":"contacts"}` and
+  `{"event":"voice"}` notifies **must stay non-retained** or they replace
+  the retained firmware notify and break OTA-on-reconnect.
 - **A notify is a promise the message is fetchable now.** Nothing
   announces before the bytes the client will ask for exist: the audio is
   written before the row is inserted, the phone's `.m4a` is rendered

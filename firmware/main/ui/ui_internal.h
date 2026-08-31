@@ -67,7 +67,7 @@ extern ui_state_t g_ui;
 typedef enum {
     SCR_HOME, SCR_RECORD, SCR_INBOX, SCR_PLAYBACK,
     SCR_PINPAD, SCR_SETTINGS, SCR_THEME_PICKER, SCR_WIFI_SETUP, SCR_SPLASH,
-    SCR_AMBIENT,
+    SCR_AMBIENT, SCR_VOICE,
     SCR_COUNT,
 } ui_screen_id_t;
 
@@ -75,6 +75,9 @@ void nav_to(ui_screen_id_t id, lv_screen_load_anim_t anim);
 /* which screen nav_to last selected (reliable mid-animation, unlike
  * lv_screen_active()) */
 bool ui_screen_is(ui_screen_id_t id);
+/* recording / wifi-setup on screen: physical-button and voice
+ * navigation must not replace them */
+bool nav_locked_out(void);
 
 /* Each screen module: build once at init, refresh on show. */
 lv_obj_t *scr_home_create(void);     void scr_home_refresh(void);
@@ -106,6 +109,7 @@ lv_obj_t *scr_ambient_create(void); void scr_ambient_show(void);
 void scr_ambient_hide(void);
 /* mail state changed while the screen is up: dock/undock the dot */
 void scr_ambient_refresh(void);
+lv_obj_t *scr_voice_create(void);   /* voice-control status (ui_voice.c) */
 /* where the wandering dot rests right now (screen coords); freezes any
  * bounce so the splash handoff starts from the same pose */
 void scr_ambient_dot_pos(int32_t *x, int32_t *y);

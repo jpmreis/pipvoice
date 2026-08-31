@@ -14,7 +14,8 @@ from fastapi import (APIRouter, BackgroundTasks, Body, Form, HTTPException,
                      Request, UploadFile)
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from . import db, emails, mqtt, notify, presence, provision, push, themes, vmsg
+from . import (db, emails, mqtt, notify, presence, provision, push, themes,
+               vmsg, voice)
 from .auth import (LOCAL_AUTH, AuthDep, Identity, client_ip, create_session,
                    issue_login_code, login_blocked, login_failed,
                    login_succeeded, redeem_login_code, token_hash,
@@ -294,6 +295,42 @@ def theme_web(name: str, ident: Identity = AuthDep, v: str = None):
     return _theme_asset(name, themes.web_path(name), "image/jpeg", v)
 
 
+# ---------- per-device config (voice control) ----------
+# The first device-scoped endpoint: everything else is user-scoped, but
+# an accessibility mode belongs to one physical box, not to the user's
+# account. Fetched by sync.c alongside its contacts refresh.
+
+@router.get("/device")
+def device_config(ident: Identity = AuthDep):
+    if not ident.device_id:
+        raise HTTPException(404, "not a device token")
+    with db.conn() as c:
+        row = db.one(c, "SELECT voice FROM devices WHERE id=?",
+                     (ident.device_id,))
+    enabled = bool(row and row["voice"])
+    if enabled:
+        # self-heal: render anything missing (renamed contact, new
+        # phrase) off-thread; the box is notified when new clips land
+        voice.ensure_user(ident.user_id)
+    return {"voice": enabled,
+            "prompts": voice.manifest(ident.user_id) if enabled else []}
+
+
+@router.get("/voice/{key}.vmsg")
+def voice_prompt(key: str, ident: Identity = AuthDep, v: str = None):
+    """Spoken-prompt clip, addressed by key + content-hash version the
+    /device manifest listed. Immutable per version, like theme assets."""
+    if not re.fullmatch(r"[a-z0-9_.-]{1,64}", key) or \
+       not re.fullmatch(r"[0-9a-f]{8}", v or ""):
+        raise HTTPException(404, "no such prompt")
+    path = voice.prompt_path(key, v)
+    if not os.path.exists(path):
+        raise HTTPException(404, "no such prompt")
+    resp = FileResponse(path, media_type="application/octet-stream")
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
+
+
 # ---------- contacts ----------
 @router.get("/contacts")
 def contacts(ident: Identity = AuthDep):
@@ -314,8 +351,8 @@ def contacts(ident: Identity = AuthDep):
 # removing a contact always writes/deletes both directions.
 
 def _managed_rows(c, user_id: int):
-    return db.all_(c, """SELECT d.id AS device_id, d.last_seen, u.id AS uid,
-                                u.username, u.display_name
+    return db.all_(c, """SELECT d.id AS device_id, d.last_seen, d.voice,
+                                u.id AS uid, u.username, u.display_name
                          FROM devices d JOIN users u ON u.id=d.user_id
                          WHERE d.admin_id=? ORDER BY d.id""", (user_id,))
 
@@ -375,10 +412,28 @@ def managed_list(ident: Identity = AuthDep):
             out.append({"device_id": r["device_id"], "username": r["username"],
                         "name": r["display_name"],
                         "last_seen": r["last_seen"],   # setup page: "online?"
+                        "voice": bool(r["voice"]),     # accessibility toggle
                         "contacts": [{"username": x["username"],
                                       "name": x["display_name"],
                                       "color": x["color"]} for x in contacts]})
     return out
+
+
+@router.post("/managed/{device_id}/voice")
+def managed_voice(device_id: str, ident: Identity = AuthDep,
+                  body: dict = Body(...)):
+    """Device admin's twin of the admin-page toggle: hands-free voice
+    control for this box. Takes effect on the box within seconds via a
+    non-retained notify; prompt clips render in the background."""
+    on = bool(body.get("on"))
+    with db.conn() as c:
+        dev = _managed_device(c, device_id, ident)
+        c.execute("UPDATE devices SET voice=? WHERE id=?",
+                  (1 if on else 0, device_id))
+    if on:
+        voice.ensure_user(dev["user_id"])
+    mqtt.notify_user(dev["user_id"], '{"event":"voice"}')
+    return {"ok": True, "voice": on}
 
 
 @router.post("/managed/{device_id}/contacts")
@@ -409,6 +464,7 @@ def managed_add(device_id: str, ident: Identity = AuthDep,
                   (target["id"], dev["user_id"]))
     if not existed:
         _notify_contacts_changed(dev["user_id"], target["id"])
+        voice.ensure_all()      # a voice box may need the new name clip
     return {"ok": True, "existed": existed,
             "contact": {"username": target["username"],
                         "name": target["display_name"],

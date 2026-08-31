@@ -30,6 +30,9 @@ typedef struct {
     uint8_t  brightness;       /* 0..255 */
     char     theme_name[24];   /* background theme; "" = none (black)      */
     bool     theme_black_text; /* text drawn directly on the background   */
+    bool     voice_enabled;    /* server-set accessibility flag (admin
+                                  "Voice control"); mirrored here so the
+                                  box listens from boot while offline    */
 } app_config_t;
 
 extern app_config_t g_cfg;
@@ -54,4 +57,5 @@ bool config_forget_wifi(const char *ssid);
 void config_save_volume(uint8_t v);
 void config_save_brightness(uint8_t b);
 void config_save_theme(const char *name, bool black_text);
+void config_save_voice(bool enabled);
 bool config_check_pin(const char *pin);

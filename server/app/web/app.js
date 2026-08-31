@@ -892,6 +892,10 @@ function manageCard(d) {
        <button class="btn accent mng-add">Add</button>
      </div>
      <div class="small mng-err" style="color:var(--danger)"></div>
+     <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:14px">
+       <input type="checkbox" class="mng-voice" ${d.voice ? "checked" : ""}>
+       Voice control (accessibility) &mdash; hands-free "Hey Pip"
+     </label>
      <p class="small dim" style="margin:14px 0 0">
        <a href="setup.html?flash=${esc(d.device_id)}"
           style="color:inherit">Re-flash this box</a>
@@ -902,6 +906,25 @@ function manageCard(d) {
   const err = card.querySelector(".mng-err");
   const input = card.querySelector(".mng-input");
   const addBtn = card.querySelector(".mng-add");
+  const voiceBox = card.querySelector(".mng-voice");
+
+  voiceBox.onchange = async () => {
+    const on = voiceBox.checked;
+    voiceBox.disabled = true;
+    try {
+      await api(`/managed/${d.device_id}/voice`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on }),
+      });
+      d.voice = on;
+      toast(on ? "Voice control on - the box listens for \"Hey Pip\""
+               : "Voice control off", "ok");
+    } catch (e) {
+      voiceBox.checked = !on;          // revert: the server didn't take it
+      toast("Could not change voice control - try again", "danger");
+    }
+    voiceBox.disabled = false;
+  };
 
   const render = () => {
     wrap.innerHTML = "";

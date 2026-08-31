@@ -4,3 +4,8 @@ dependencies:
   waveshare/esp32_s3_touch_amoled_1_8: "^2.0.3"   # display+touch+LVGL9+codec BSP
   joltwallet/littlefs: "^1.14.0"
   lvgl/lvgl: "^9.2.0"
+  # voice control: TFLite-Micro (wake-word inference) + the micro-speech
+  # feature frontend the microWakeWord models were trained against.
+  # ~1.3.3 matches the pairing ESPHome ships in production.
+  espressif/esp-tflite-micro: "~1.3.3"
+  esphome/esp-micro-speech-features: "^1.2.3"

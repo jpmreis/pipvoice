@@ -106,6 +106,7 @@ void config_load(void)
     g_cfg.brightness     = (uint8_t)get_u32(h, "brightness", 255);
     get_str(h, "theme", g_cfg.theme_name, sizeof(g_cfg.theme_name), "");
     g_cfg.theme_black_text = get_u32(h, "theme_fg", 0) != 0;
+    g_cfg.voice_enabled    = get_u32(h, "voice_en", 0) != 0;
 
     /* WiFi network list; migrate the legacy single-network keys into it.
      * Zero networks is a valid state: app_main auto-opens WiFi setup. */
@@ -194,6 +195,8 @@ bool config_forget_wifi(const char *ssid)
 
 void config_save_volume(uint8_t v)     { g_cfg.speaker_volume = v; save_u32("volume", v); }
 void config_save_brightness(uint8_t b) { g_cfg.brightness = b;     save_u32("brightness", b); }
+void config_save_voice(bool enabled)   { g_cfg.voice_enabled = enabled;
+                                         save_u32("voice_en", enabled ? 1 : 0); }
 
 void config_save_theme(const char *name, bool black_text)
 {

@@ -2,6 +2,7 @@
 #include "opus_file.h"
 #include "storage.h"
 #include "config.h"
+#include "voice_infer.h"
 #include "bsp/esp-bsp.h"
 #include "esp_codec_dev.h"
 #include "esp_heap_caps.h"
@@ -17,8 +18,13 @@
 static const char *TAG = "audio";
 
 typedef enum { CMD_REC_START, CMD_REC_STOP, CMD_REC_CANCEL,
-               CMD_PLAY, CMD_STOP, CMD_CHIME } cmd_id_t;
-typedef struct { cmd_id_t id; char path[96]; chime_t chime; } cmd_t;
+               CMD_PLAY, CMD_STOP, CMD_CHIME,
+               CMD_NOP /* wake the task so it re-reads s_listen_want */
+} cmd_id_t;
+#define AF_PROMPT 0x01   /* play: completion -> prompt_done, no progress */
+#define AF_VAD    0x02   /* record: auto-stop on trailing silence        */
+typedef struct { cmd_id_t id; char path[96]; chime_t chime;
+                 uint8_t flags; } cmd_t;
 
 static QueueHandle_t       s_q;
 static SemaphoreHandle_t   s_rec_done;
@@ -89,8 +95,15 @@ static void rec_dsp(int16_t *pcm, int n)
     }
 }
 
+/* voice-flow recording end-pointing (AF_VAD): post-DSP RMS per 20 ms
+ * frame. Values are post-gain (x3), so close speech sits well above the
+ * threshold; tune on hardware with the serial log if the cut is early. */
+#define REC_VAD_SPEECH_RMS   1200.0f
+#define REC_VAD_TRAIL_MS     1500    /* stop after this much trailing hush */
+#define REC_VAD_GIVEUP_MS    5000    /* nothing said at all: give up      */
+
 /* ---------------- recording ---------------- */
-static void do_record(void)
+static void do_record(uint8_t flags)
 {
     if (storage_free_kb() < 512) {
         /* a full inbox must not block recording - evict before refusing */
@@ -123,6 +136,8 @@ static void do_record(void)
         (uint32_t)g_cfg.max_message_s * 1000 / VMSG_FRAME_MS;
     uint16_t last_tick = 0xFFFF;
     bool cancelled = false;
+    bool     spoke = false;          /* AF_VAD: any speech yet?          */
+    uint32_t hush_frames = 0;        /* AF_VAD: consecutive quiet frames */
 
     for (;;) {
         cmd_t c;
@@ -134,6 +149,20 @@ static void do_record(void)
 
         if (esp_codec_dev_read(s_mic, pcm, sizeof(pcm)) != 0) break;
         rec_dsp(pcm, VMSG_FRAME_SAMPLES);
+        if (flags & AF_VAD) {
+            float acc = 0;
+            for (int i = 0; i < VMSG_FRAME_SAMPLES; i++)
+                acc += (float)pcm[i] * (float)pcm[i];
+            bool loud = sqrtf(acc / (float)VMSG_FRAME_SAMPLES)
+                        > REC_VAD_SPEECH_RMS;
+            hush_frames = loud ? 0 : hush_frames + 1;
+            if (loud) spoke = true;
+            if (spoke && hush_frames * VMSG_FRAME_MS >= REC_VAD_TRAIL_MS)
+                break;                       /* they finished talking     */
+            if (!spoke && frames * VMSG_FRAME_MS >= REC_VAD_GIVEUP_MS)
+                break;                       /* nothing but room tone:
+                                                reported as dur 0 below   */
+        }
         if (!vmsg_writer_frame(w, pcm)) break;
         frames++;
 
@@ -146,6 +175,7 @@ static void do_record(void)
 
     esp_codec_dev_close(s_mic);
     uint16_t dur = (uint16_t)(frames * VMSG_FRAME_MS / 1000);
+    if ((flags & AF_VAD) && !spoke) dur = 0;   /* only room tone captured */
     vmsg_writer_close(w, dur);
     if (cancelled) {
         remove(OUTBOX_DIR "/rec_tmp.vmsg");
@@ -159,13 +189,19 @@ static void do_record(void)
 }
 
 /* ---------------- playback ---------------- */
-static void do_play(const char *path)
+/* AF_PROMPT (voice flow): completion goes to prompt_done instead of
+ * play_done and no progress ticks - the playback screen isn't open.
+ * An unopenable path still fires prompt_done: voice.c leans on that to
+ * fall through to the answer window when a prompt clip is missing. */
+static void do_play(const char *path, uint8_t flags)
 {
+    bool prompt = (flags & AF_PROMPT) != 0;
     uint16_t total = 0;
     vmsg_reader_t *r = vmsg_reader_open(path, &total);
     if (!r || esp_codec_dev_open(s_spk, &s_fs) != 0) {
         if (r) vmsg_reader_close(r);
-        if (s_ev.play_done) s_ev.play_done();
+        if (prompt) { if (s_ev.prompt_done) s_ev.prompt_done(); }
+        else if (s_ev.play_done) s_ev.play_done();
         return;
     }
     esp_codec_dev_set_out_vol(s_spk, g_cfg.speaker_volume);
@@ -186,13 +222,14 @@ static void do_play(const char *path)
         uint16_t sec = (uint16_t)(frames * VMSG_FRAME_MS / 1000);
         if (sec != last) {
             last = sec;
-            if (s_ev.play_progress) s_ev.play_progress(sec, total);
+            if (!prompt && s_ev.play_progress) s_ev.play_progress(sec, total);
         }
     }
 
     esp_codec_dev_close(s_spk);
     vmsg_reader_close(r);
-    if (!interrupted && s_ev.play_done) s_ev.play_done();
+    if (prompt) { if (s_ev.prompt_done) s_ev.prompt_done(); }
+    else if (!interrupted && s_ev.play_done) s_ev.play_done();
 }
 
 /* One struck-tine note (celesta / music-box family): a stack of partials
@@ -221,11 +258,16 @@ static void do_chime(chime_t which)
      * Pre-rendered BEFORE the codec opens: synthesizing live (~12
      * transcendental calls/sample) raced the 20 ms frame deadline and
      * garbled whenever wifi preempted this core. 21 KB @16k -> PSRAM. */
+    /* CHIME_PROMPT (voice flow: wake ack / "go" cue / missing-prompt
+     * fallback) is a single struck tine - box-only, no PWA twin. */
     const float rise[2] = { 880.0f, 1320.0f };
     const float fall[2] = { 1320.0f, 880.0f };
-    const float *freqs = (which == CHIME_SENT) ? rise : fall;
+    const float one[2]  = { 990.0f, 0.0f };
+    const float *freqs = (which == CHIME_SENT) ? rise
+                       : (which == CHIME_PROMPT) ? one : fall;
     const float onset2 = 0.150f;                 /* second note start, s   */
-    const int total_frames = 650 / VMSG_FRAME_MS;   /* ~650ms incl. ring-out */
+    const int total_frames = (which == CHIME_PROMPT ? 350 : 650)
+                             / VMSG_FRAME_MS;       /* incl. ring-out        */
     const int n = total_frames * VMSG_FRAME_SAMPLES;
     int16_t *pcm = heap_caps_malloc(n * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     if (!pcm) return;
@@ -244,22 +286,90 @@ static void do_chime(chime_t which)
     heap_caps_free(pcm);
 }
 
+/* ---------------- wake-word listening ---------------- */
+/* Voice control keeps the mic open between commands and streams 10 ms
+ * hops through voice_infer (wake/"yes" models + energy VAD). Runs in
+ * this task because mic and speaker are two codec-dev handles on the
+ * same ES8311 over one I2S duplex pair: whoever owns the chip must be
+ * the one to stop listening before opening the speaker. Commands still
+ * preempt within one hop (queue polled per iteration, like do_record).
+ * The models want RAW pcm - rec_dsp()'s limiter stays out of this path. */
+static volatile bool s_listen_want;
+static void handle_cmd(const cmd_t *c);
+
+static void do_listen(void)
+{
+    static bool infer_ready, infer_failed;
+    if (!infer_ready) {
+        if (infer_failed || !(infer_ready = voice_infer_init())) {
+            /* broken model: stop asking, or this would spin */
+            if (!infer_failed) ESP_LOGE(TAG, "voice models unusable");
+            infer_failed = true;
+            s_listen_want = false;
+            return;
+        }
+    }
+    if (esp_codec_dev_open(s_mic, &s_fs) != 0) {
+        ESP_LOGW(TAG, "listen: mic open failed");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        return;
+    }
+    esp_codec_dev_set_in_gain(s_mic, MIC_GAIN_DB);
+
+    int16_t pcm[VMSG_FRAME_SAMPLES / 2];        /* one 10 ms hop */
+    for (int i = 0; i < 4; i++)                 /* power-up pop */
+        esp_codec_dev_read(s_mic, pcm, sizeof(pcm));
+    voice_infer_reset();
+
+    for (;;) {
+        cmd_t c;
+        if (xQueueReceive(s_q, &c, 0) == pdTRUE) {
+            /* release the codec BEFORE the command runs: it may open
+             * the speaker (prompt/chime) or reopen the mic (record) */
+            esp_codec_dev_close(s_mic);
+            handle_cmd(&c);
+            return;
+        }
+        if (!s_listen_want) {
+            esp_codec_dev_close(s_mic);
+            return;
+        }
+        if (esp_codec_dev_read(s_mic, pcm, sizeof(pcm)) != 0) {
+            esp_codec_dev_close(s_mic);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            return;
+        }
+        uint32_t hits = voice_infer_feed(pcm, VMSG_FRAME_SAMPLES / 2);
+        if (hits && s_ev.voice_hits) s_ev.voice_hits(hits);
+    }
+}
+
 /* ---------------- task ---------------- */
+static void handle_cmd(const cmd_t *c)
+{
+    switch (c->id) {
+        case CMD_REC_START: do_record(c->flags);          break;
+        case CMD_PLAY:      do_play(c->path, c->flags);   break;
+        case CMD_CHIME:     do_chime(c->chime);           break;
+        case CMD_REC_CANCEL:                   /* recording already done:
+                                                  discard the finished file */
+            remove(OUTBOX_DIR "/rec_tmp.vmsg");
+            break;
+        default: break;   /* stray STOPs / NOPs ignored when idle */
+    }
+}
+
 static void audio_task(void *arg)
 {
     for (;;) {
+        if (s_listen_want && s_codec_ok) {
+            do_listen();          /* returns after handling one command
+                                     or when listening was switched off */
+            continue;
+        }
         cmd_t c;
         if (xQueueReceive(s_q, &c, portMAX_DELAY) != pdTRUE) continue;
-        switch (c.id) {
-            case CMD_REC_START: do_record();       break;
-            case CMD_PLAY:      do_play(c.path);   break;
-            case CMD_CHIME:     do_chime(c.chime); break;
-            case CMD_REC_CANCEL:                   /* recording already done:
-                                                      discard the finished file */
-                remove(OUTBOX_DIR "/rec_tmp.vmsg");
-                break;
-            default: break;   /* stray STOPs ignored when idle */
-        }
+        handle_cmd(&c);
     }
 }
 
@@ -324,5 +434,27 @@ void audio_stop(void)                { post(CMD_STOP, NULL); }
 void audio_play_chime(chime_t which)
 {
     cmd_t c = { .id = CMD_CHIME, .chime = which };
+    xQueueSend(s_q, &c, 0);
+}
+
+/* ---------------- voice control ---------------- */
+void audio_voice_listen(bool on)
+{
+    s_listen_want = on;
+    /* the task may be blocked on the queue: poke it so it re-evaluates */
+    if (on) post(CMD_NOP, NULL);
+}
+
+void audio_play_prompt(const char *path)
+{
+    cmd_t c = { .id = CMD_PLAY, .flags = AF_PROMPT };
+    strlcpy(c.path, path, sizeof(c.path));
+    xQueueSend(s_q, &c, 0);
+}
+
+void audio_record_start_vad(void)
+{
+    xSemaphoreTake(s_rec_done, 0);          /* clear any stale signal */
+    cmd_t c = { .id = CMD_REC_START, .flags = AF_VAD };
     xQueueSend(s_q, &c, 0);
 }

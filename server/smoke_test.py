@@ -64,6 +64,62 @@ r = c.get("/v1/contacts", headers=H_E)
 ok(r.status_code == 200 and [x["device_id"] for x in r.json()] == ["grandma"],
    "ella's contacts = [grandma]")
 
+# --- voice control (accessibility): flag, prompts, per-device config ---
+r = c.get("/v1/device", headers=H_E)
+ok(r.status_code == 200 and r.json() == {"voice": False, "prompts": []},
+   "voice: /v1/device defaults off")
+ok(c.get("/v1/device").status_code == 404,
+   "voice: /v1/device rejects non-device identities")
+
+r = c.post("/admin/devices/pip-ella-01/voice", data={"on": "1"})
+ok(r.status_code == 303, "admin voice toggle -> on")
+from app import db as vdb
+with vdb.conn() as cc:
+    ok(vdb.one(cc, "SELECT voice FROM devices WHERE id='pip-ella-01'")
+       ["voice"] == 1, "voice flag stored on the device row")
+
+# deterministic prompt rendering: fake the TTS backend (CI machines have
+# neither piper nor espeak-ng) and render synchronously
+from app import voice as _voice
+import math, struct as _st
+_voice.backend = lambda: ("test", "v0")
+def _fake_wav(text):
+    pcm = b"".join(_st.pack("<h", int(8000 * math.sin(i / 8)))
+                   for i in range(16000))                      # 1 s tone
+    hdr = (b"RIFF" + _st.pack("<I", 36 + len(pcm)) + b"WAVEfmt "
+           + _st.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16)
+           + b"data" + _st.pack("<I", len(pcm)))
+    return hdr + pcm
+_voice._tts_wav = _fake_wav
+ok(_voice._render_user(2) >= 4, "voice prompts rendered (canned + contact)")
+
+r = c.get("/v1/device", headers=H_E)
+vd = r.json()
+vkeys = {p["key"] for p in vd["prompts"]}
+ok(vd["voice"] and {"ask_play", "ask_confirm", "cancelled",
+                    "ask_send-grandma"} <= vkeys,
+   "voice manifest lists canned + per-contact clips")
+vp = next(p for p in vd["prompts"] if p["key"] == "ask_send-grandma")
+r = c.get(f"/v1/voice/{vp['key']}.vmsg?v={vp['ver']}", headers=H_E)
+ok(r.status_code == 200 and r.content[:4] == b"VMSG"
+   and "immutable" in r.headers["cache-control"],
+   "prompt clip served as immutable .vmsg")
+ok(c.get(f"/v1/voice/{vp['key']}.vmsg?v=00000000",
+         headers=H_E).status_code == 404, "stale prompt version 404s")
+
+# device admin flips it off from the PWA endpoint
+r = c.post("/admin/devices/pip-ella-01/admin", data={"admin_id": "1"})
+ok(r.status_code == 303, "papa set as pip-ella-01's device admin")
+r = c.get("/v1/managed")
+ok(any(x["device_id"] == "pip-ella-01" and x["voice"] is True
+       for x in r.json()), "managed list carries the voice flag")
+r = c.post("/v1/managed/pip-ella-01/voice", json={"on": False})
+ok(r.status_code == 200 and r.json()["voice"] is False,
+   "device admin turns voice off")
+r = c.get("/v1/device", headers=H_E)
+ok(r.json() == {"voice": False, "prompts": []},
+   "voice off again: config reflects it")
+
 # --- send a message ella -> grandma ---
 vmsg = b"VMSG" + bytes(8) + b"\x02\x00ab" * 50
 r = c.post("/v1/messages", headers=H_E,
@@ -545,9 +601,13 @@ ok(r.status_code == 303 and r.headers["location"].endswith("sent=0"),
    "send-install reports not-sent while SMTP unset")
 
 # --- self-host local passwords (PIP_LOCAL_AUTH=1) ---
+# (subset check, not equality: the endpoint grew a "waitlist" key and a
+# strict compare silently killed every assertion after this one)
 r = c.get("/v1/auth/methods")
-ok(r.status_code == 200 and r.json() == {"code": False, "password": True},
-   "auth methods: password on, code off (no SMTP)")
+m = r.json()
+ok(r.status_code == 200 and m["code"] is False and m["password"] is True
+   and m["waitlist"] is False,
+   "auth methods: password on, code off (no SMTP), no waitlist (self-host)")
 r = web.post(f"/admin/users/{wid}/password", data={"password": "short"})
 ok(r.status_code == 400, "short password rejected")
 r = web.post(f"/admin/users/{wid}/password",
