@@ -14,13 +14,17 @@ streaming models (int8 TFLite, ~50-100 KB) running on
 
 ## Current state
 
-`models/hey_jarvis.tflite` is the **pretrained stand-in** (from
-[esphome/micro-wake-word-models](https://github.com/esphome/micro-wake-word-models),
-Apache-2.0) so the firmware integration can be benched by saying
-"Hey Jarvis" before our own models exist. There is no pretrained
-"yes": until a confirm model is dropped in, the firmware falls back to
-energy-VAD ("any speech in the answer window = yes"), which is also
-the permanent fallback if the confirm model ever misbehaves.
+`models/hey_pip.tflite` is **our trained wake model** (2026-08-31:
+12k piper positives + 13.2k confusables, exported from best_weights at
+step 28k/45k — validation was already at <4 ambient false fires/hour
+with ~89% viable recall by step 8.5k). `models/hey_jarvis.json` /
+`.tflite` remain as the pretrained reference the integration was first
+benched against ([esphome/micro-wake-word-models](https://github.com/esphome/micro-wake-word-models),
+Apache-2.0). There is still no "yes" confirm model (train with
+`TRAIN_SLOTS = ["confirm"]`): until it is dropped in, the firmware
+falls back to energy-VAD ("any speech in the answer window = yes"),
+which also remains the permanent fallback if the confirm model ever
+misbehaves.
 
 ## Training (Google Colab, GPU)
 
