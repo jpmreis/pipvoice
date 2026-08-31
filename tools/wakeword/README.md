@@ -24,26 +24,32 @@ the permanent fallback if the confirm model ever misbehaves.
 
 ## Training (Google Colab, GPU)
 
-Hardware: a free Colab T4 is enough; a full run (sample generation +
-training) is roughly 1-2 h per word. Nothing here needs a local GPU.
+Everything is packaged in **`train_pip_models.ipynb`** — upload it to
+[colab.research.google.com](https://colab.research.google.com) (or open
+via GitHub), pick a **GPU runtime**, and **Run all**. It trains *both*
+models ("hey pip" wake + "yes/yeah/yep" confirm, with "no" trained as a
+hard negative), and ends by downloading `pip_voice_models.zip`.
 
-1. Open the microWakeWord
-   [basic_training_notebook](https://github.com/OHF-Voice/micro-wake-word/blob/main/notebooks/basic_training_notebook.ipynb)
-   on Colab (GPU runtime). If the upstream notebook has dependency
-   bit-rot, the community wrapper
-   [microwakeword-trainer](https://github.com/alfiedennen/microwakeword-trainer)
-   patches the known issues.
-2. Set the target phrase: `hey pip` (then a second run for `yes`).
-   Piper-sample-generator synthesizes ~2000-4000 utterances across many
-   English voices with pitch/speed/noise/room augmentation; negatives
-   come from the pre-computed spectrogram sets on Hugging Face that the
-   notebook downloads.
-3. Thresholds: train as-is; the *runtime* cutoff is set at export
-   (below). Aim strict for "hey pip" (always armed), permissive for
-   "yes" (window-gated, a false accept costs little).
-4. Download the quantized **streaming** `.tflite` into `models/` as
-   `hey_pip.tflite` / `yes.tflite`, with a sidecar `.json` noting the
-   notebook settings (copy the shape of `models/hey_jarvis.json`).
+Hardware: an **A100 + High-RAM** (Colab Pro) does both words in
+~1.5-2 h. A free **T4** works but is slow and can run out of system RAM
+during validation — set `LOW_RESOURCE = True` in the config cell and
+train one word per session (`TRAIN_SLOTS`), ~3-4 h each. Nothing needs
+a local GPU.
+
+The notebook is adapted from the OHF-Voice
+[basic_training_notebook](https://github.com/OHF-Voice/micro-wake-word/blob/main/notebooks/basic_training_notebook.ipynb)
+with the working fixes from the community
+[microwakeword-trainer](https://github.com/alfiedennen/microwakeword-trainer)
+baked in (no kernel restart, patched train.py, per-word confusable
+negatives). Piper synthesizes ~20k voiced utterances per word from IPA;
+negatives are kahrendt's pre-computed spectrogram sets from Hugging
+Face plus the confusables.
+
+Back on the Mac: unzip into `models/` and run **`./install_models.sh`**
+— it regenerates both firmware C arrays and rebuilds. Thresholds: strict
+for "hey pip" (always armed, default 0.97), permissive for "yes"
+(window-gated, default 0.85); pass overrides as
+`./install_models.sh 0.95 0.8` after reading validate.py's sweep.
 
 ### Personal fine-tune (only if real-world detection disappoints)
 
