@@ -12,6 +12,25 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-08-31
+
+The box learns its own name. 1.2.0 shipped voice control listening for
+a stand-in wake word; this release embeds our own trained "Hey Pip"
+model, so the accessibility flow finally answers to the name on the
+front of the box. Still opt-in per device and dormant everywhere else.
+
+### Changed
+- The wake model is now a purpose-trained "Hey Pip" (12k synthesized
+  voices + 13k phonetic near-misses like "hey pete", "hey pippa" and
+  the other assistants' wake words as hard negatives; validation showed
+  under 4 ambient false fires per hour mid-training and improving).
+  The "Hey Jarvis" stand-in is retired to a reference file. Saying
+  "yes" to confirm still uses the any-speech fallback until the
+  confirm model is trained - the flow behaves the same either way.
+- Training is now a one-click Colab notebook (`tools/wakeword/`) with
+  the whole pipeline pinned and an early-stop recovery recipe, plus an
+  install script that embeds downloaded models and rebuilds.
+
 ## [1.2.0] — 2026-08-31
 
 Voice control: a hands-free accessibility mode, built for a family
