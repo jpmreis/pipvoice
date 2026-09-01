@@ -12,6 +12,21 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-09-01
+
+Voice control learns to hear "yes". Both wake and confirm now run on
+purpose-trained models; still opt-in per device, dormant elsewhere.
+
+### Changed
+- Answering a question ("Hear them?", "Send a message to Mom?",
+  "Send it?") now requires an actual yes-family word — *yes*, *yeah*
+  or *yep* — instead of accepting any speech in the window. The new
+  confirm model was trained the same way as "Hey Pip", with *no*,
+  *nope* and *not yet* as heavily-penalized near-misses, so a "no"
+  keeps meaning no. The any-speech fallback remains in the firmware
+  as a safety net and takes over automatically if the confirm model
+  is ever absent.
+
 ## [1.3.0] — 2026-08-31
 
 The box learns its own name. 1.2.0 shipped voice control listening for
