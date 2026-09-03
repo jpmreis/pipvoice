@@ -18,7 +18,12 @@ import wave
 from pathlib import Path
 
 import numpy as np
-from micro_features import MicroFrontend
+from pymicro_features import MicroFrontend
+
+# pymicro-features 2.0.x returns features already divided by 25.6 (the
+# classic micro_speech float scaling); the firmware frontend hands us the
+# raw uint16 values. Undo it or every model silently scores 0.0.
+FEATURE_PRESCALE = 25.6
 
 try:
     from ai_edge_litert.interpreter import Interpreter
@@ -60,14 +65,14 @@ class Stream:
         audio = pcm.tobytes()
         i = 0
         while i + 320 <= len(audio):          # 160 samples = 10 ms hops
-            frame = self.frontend.ProcessSamples(audio[i:i + 320])
+            frame = self.frontend.process_samples(audio[i:i + 320])
             i += frame.samples_read * 2
             t += frame.samples_read / 16000.0
             if not frame.features:
                 continue
             # firmware scaling: int8 = feature * 256/666 - 128
             feats = (np.array(frame.features, dtype=np.float32)
-                     * 256.0 / 666.0 - 128.0)
+                     * FEATURE_PRESCALE * 256.0 / 666.0 - 128.0)
             buf.append(np.clip(feats, -128, 127).astype(np.int8))
             if len(buf) < self.stride:
                 continue

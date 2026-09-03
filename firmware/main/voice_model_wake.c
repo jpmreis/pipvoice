@@ -3,7 +3,7 @@
 #include "voice_models.h"
 
 const char voice_model_wake_name[] = "hey_pip";
-const float voice_model_wake_cutoff = 0.970f;
+const float voice_model_wake_cutoff = 0.350f;
 const unsigned int voice_model_wake_len = 60840;
 const unsigned char voice_model_wake_data[] __attribute__((aligned(16))) = {
     0x1c, 0x00, 0x00, 0x00, 0x54, 0x46, 0x4c, 0x33, 0x14, 0x00, 0x20, 0x00,

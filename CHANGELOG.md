@@ -12,6 +12,26 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-09-03
+
+Voice control detection cutoffs re-tuned from real-hardware bench data.
+The 1.3.0/1.3.1 thresholds (0.97 wake, 0.85 confirm) came from synthetic
+validation and turned out to be unreachable for real voices through the
+box mic — the trained models are early-stopped and produce soft
+probabilities (live "Hey Pip" from one metre scores ~0.4–0.6, ordinary
+speech ≤0.06), so the box went deaf in practice.
+
+### Fixed
+- Wake cutoff 0.97 → 0.35: "Hey Pip" now detects reliably at
+  conversational distance instead of once in a blue moon.
+- Confirm cutoff 0.85 → 0.10: "yes"/"yeah"/"yep" land in the answer
+  window. Safety margins hold — "no", "nope", "not yet" and ordinary
+  speech all score ≤0.004 on the confirm model, 25× below the new
+  cutoff, and the window is only armed for 3.5 s after a question.
+- `tools/wakeword/validate.py`: track pymicro-features 2.0.2 (method
+  rename, and features now arrive pre-scaled by 1/25.6 — without
+  undoing that, every model scores 0.0 and validation silently lies).
+
 ## [1.3.1] — 2026-09-01
 
 Voice control learns to hear "yes". Both wake and confirm now run on
