@@ -92,6 +92,9 @@ typedef struct {
     /* reactions */
     void (*react)(const char *msg_id, const char *key);   /* "" = clear   */
     void (*reactions_seen)(const char *contact_id);       /* badge tapped */
+    /* X on the voice screen: abort the hands-free session, not just the
+     * screen (or the flow keeps talking and reopens it) */
+    void (*voice_cancel)(void);
     /* settings & provisioning */
     bool (*pin_check)(const char *pin);     /* true if PIN correct         */
     /* AP signal in dBm for the status-bar strength icon, 0 = unknown;

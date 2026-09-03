@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>            /* ftruncate for vmsg_writer_trim */
 
 static const char *TAG = "vmsg";
 
@@ -47,6 +48,22 @@ bool vmsg_writer_frame(vmsg_writer_t *w, const int16_t *pcm)
     uint16_t len = (uint16_t)n;
     fwrite(&len, 2, 1, w->f);
     fwrite(pkt, 1, n, w->f);
+    return true;
+}
+
+long vmsg_writer_tell(vmsg_writer_t *w)
+{
+    return ftell(w->f);
+}
+
+bool vmsg_writer_trim(vmsg_writer_t *w, long offset)
+{
+    fflush(w->f);
+    if (ftruncate(fileno(w->f), offset) != 0) {
+        ESP_LOGW(TAG, "trim failed at %ld", offset);
+        return false;
+    }
+    fseek(w->f, offset, SEEK_SET);
     return true;
 }
 

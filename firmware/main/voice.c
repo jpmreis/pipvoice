@@ -78,6 +78,8 @@ static bool prompt_path(const char *key, char *out, size_t cap)
  * right away - the screen carries the question, the flow never stalls. */
 static void say(const char *key)
 {
+    power_user_activity();     /* each question resets the 15 s dim timer:
+                                  a full contact cycle outlives it */
     char path[96];
     if (!prompt_path(key, path, sizeof(path))) {
         ESP_LOGW(TAG, "prompt '%s' not cached, chiming instead", key);
@@ -141,6 +143,7 @@ static void step_play_next(void)
     char path[96];
     snprintf(path, sizeof(path), INBOX_DIR "/%s.vmsg",
              s_unheard[s_play_idx]);
+    power_user_activity();
     s_state = V_PLAYING;
     VUI(ui_voice_show("Playing message", ""));
     audio_play_prompt(path);
@@ -313,6 +316,25 @@ static void timer_cb(void *arg)
 /* ---------------- lifecycle ---------------- */
 bool voice_enabled(void)        { return s_enabled; }
 bool voice_session_active(void) { return s_state != V_IDLE; }
+
+void voice_cancel(void)
+{
+    /* The X on the voice screen (LVGL task context). Ends the session
+     * without touching the screen - the tapper is already closing it.
+     * audio_stop() cuts a prompt mid-play; its prompt_done then arrives
+     * in V_IDLE and falls through the switch. */
+    LOCK();
+    if (s_state != V_IDLE) {
+        ESP_LOGI(TAG, "session dismissed");
+        if (s_state == V_RECORDING || s_state == V_ASK_CONFIRM ||
+            s_state == V_ASK_CONFIRM_WAIT)
+            s_app.record_cancel();
+        window_close();
+        s_state = V_IDLE;
+        audio_stop();
+    }
+    UNLOCK();
+}
 
 void voice_set_enabled(bool on)
 {

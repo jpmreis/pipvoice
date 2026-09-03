@@ -33,6 +33,10 @@ bool voice_enabled(void);
  * record_done to voice_on_record_done instead of the record screen */
 bool voice_session_active(void);
 
+/* abort the in-flight session (the X on the voice screen); leaves the
+ * screen to the caller, safe to call from the LVGL task */
+void voice_cancel(void);
+
 /* events (audio-task context) */
 void voice_on_hits(uint32_t mask);          /* VOICE_HIT_* (voice_infer.h) */
 void voice_on_prompt_done(void);

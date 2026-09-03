@@ -102,6 +102,18 @@ static void rec_dsp(int16_t *pcm, int n)
 #define REC_VAD_TRAIL_MS     1500    /* stop after this much trailing hush */
 #define REC_VAD_GIVEUP_MS    5000    /* nothing said at all: give up      */
 
+/* Saying "yes" also ends a hands-free recording - and gets trimmed out,
+ * so the sent message doesn't close with the confirmation word. The
+ * confirm model fires near the END of the word, so accepting a hit means
+ * cutting back past the word itself (plus detection latency). A hit is
+ * only honored after a short hold proves the speaker actually stopped:
+ * "yes, bring the cake" keeps recording ("yes" mid-sentence is speech
+ * within the hold, which vetoes the cut). All in 20 ms frames. */
+#define REC_YES_TRIM_MS      900     /* cut this far back from the hit    */
+#define REC_YES_GRACE_MS     160     /* word tail may still read as loud  */
+#define REC_YES_HOLD_MS      400     /* silence needed to accept the hit  */
+#define REC_YES_RING         96      /* frame offsets kept for trimming   */
+
 /* ---------------- recording ---------------- */
 static void do_record(uint8_t flags)
 {
@@ -139,6 +151,15 @@ static void do_record(uint8_t flags)
     bool     spoke = false;          /* AF_VAD: any speech yet?          */
     uint32_t hush_frames = 0;        /* AF_VAD: consecutive quiet frames */
 
+    /* "yes" end-pointing (see REC_YES_* above). The offset ring is
+     * static: one audio task, and 96 longs don't belong on this stack. */
+    static long yes_offs[REC_YES_RING];
+    const bool yes_ep = (flags & AF_VAD) && voice_infer_has_confirm();
+    bool     yes_pending = false;
+    uint32_t yes_hit = 0;
+    if (yes_ep) voice_infer_confirm_restart();
+    int16_t raw[VMSG_FRAME_SAMPLES];  /* pre-DSP copy for the model */
+
     for (;;) {
         cmd_t c;
         if (xQueueReceive(s_q, &c, 0) == pdTRUE) {
@@ -148,6 +169,7 @@ static void do_record(uint8_t flags)
         if (frames >= max_frames) break;
 
         if (esp_codec_dev_read(s_mic, pcm, sizeof(pcm)) != 0) break;
+        if (yes_ep) memcpy(raw, pcm, sizeof(raw));
         rec_dsp(pcm, VMSG_FRAME_SAMPLES);
         if (flags & AF_VAD) {
             float acc = 0;
@@ -162,7 +184,29 @@ static void do_record(uint8_t flags)
             if (!spoke && frames * VMSG_FRAME_MS >= REC_VAD_GIVEUP_MS)
                 break;                       /* nothing but room tone:
                                                 reported as dur 0 below   */
+            if (yes_ep) {
+                if (voice_infer_feed_confirm(raw, VMSG_FRAME_SAMPLES) &&
+                    !yes_pending) {
+                    yes_pending = true;
+                    yes_hit = frames;
+                }
+                if (yes_pending) {
+                    uint32_t since = (frames - yes_hit) * VMSG_FRAME_MS;
+                    if (loud && since > REC_YES_GRACE_MS) {
+                        yes_pending = false;   /* mid-sentence "yes" */
+                    } else if (since >= REC_YES_HOLD_MS) {
+                        uint32_t back = REC_YES_TRIM_MS / VMSG_FRAME_MS;
+                        uint32_t cut = yes_hit > back ? yes_hit - back : 0;
+                        if (vmsg_writer_trim(w, yes_offs[cut % REC_YES_RING]))
+                            frames = cut;
+                        ESP_LOGI(TAG, "yes end-point: cut at %lums",
+                                 (unsigned long)(frames * VMSG_FRAME_MS));
+                        break;
+                    }
+                }
+            }
         }
+        if (yes_ep) yes_offs[frames % REC_YES_RING] = vmsg_writer_tell(w);
         if (!vmsg_writer_frame(w, pcm)) break;
         frames++;
 

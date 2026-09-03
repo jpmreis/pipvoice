@@ -454,6 +454,7 @@ void app_main(void)
         .inbox_opened = cb_inbox_opened,
         .react = cb_react,
         .reactions_seen = cb_reactions_seen,
+        .voice_cancel = voice_cancel,
         .pin_check = cb_pin,
         .wifi_rssi = cb_wifi_rssi,
         .volume_changed = cb_volume,

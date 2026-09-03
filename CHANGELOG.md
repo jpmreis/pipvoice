@@ -12,6 +12,26 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.3] — 2026-09-03
+
+First real-use feedback on hands-free voice control, same-day fixes.
+
+### Added
+- Saying "yes" now also ends a hands-free recording — and gets trimmed
+  out of the message, so it no longer arrives with the confirmation
+  word tacked on the end. The recorder runs the confirm model on the
+  live mic, and a detection followed by a beat of silence cuts the
+  recording back to just before the word (a "yes" mid-sentence keeps
+  recording — continued speech vetoes the cut). If the word is missed,
+  the old stop-on-silence still applies.
+
+### Fixed
+- The X on the voice screen now actually aborts the session. It used
+  to close only the screen while the flow kept talking through a full
+  contact cycle (and reopened the screen to do it).
+- The display no longer dims mid-session: every question resets the
+  activity timer, so the screen stays bright while Pip is asking.
+
 ## [1.3.2] — 2026-09-03
 
 Voice control detection cutoffs re-tuned from real-hardware bench data.

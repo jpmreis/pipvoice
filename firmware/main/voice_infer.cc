@@ -221,6 +221,33 @@ extern "C" void voice_infer_arm_confirm(bool on)
     s_confirm_armed = on;
 }
 
+extern "C" void voice_infer_confirm_restart(void)
+{
+    slot_reset(&s_confirm);
+}
+
+extern "C" bool voice_infer_feed_confirm(const int16_t *pcm, size_t n)
+{
+    if (!s_fe_ok || !s_confirm.ok || n == 0) return false;
+    bool hit = false;
+    size_t consumed = 0;
+    while (consumed < n) {
+        size_t read = 0;
+        struct FrontendOutput out = FrontendProcessSamples(
+            &s_fe, pcm + consumed, n - consumed, &read);
+        consumed += read;
+        if (read == 0) break;
+        if (out.size != FEATURE_SIZE) continue;
+        int8_t feat[FEATURE_SIZE];
+        for (size_t i = 0; i < FEATURE_SIZE; i++) {
+            int32_t v = ((int32_t)out.values[i] * 256) / 666 - 128;
+            feat[i] = (int8_t)(v < -128 ? -128 : v > 127 ? 127 : v);
+        }
+        if (slot_feed(&s_confirm, feat)) hit = true;
+    }
+    return hit;
+}
+
 extern "C" uint32_t voice_infer_feed(const int16_t *pcm, size_t n)
 {
     if (!s_fe_ok || !s_wake.ok || n == 0) return 0;

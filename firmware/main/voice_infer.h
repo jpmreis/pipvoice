@@ -40,6 +40,13 @@ void voice_infer_arm_confirm(bool on);
 /* Process one hop of raw PCM; returns VOICE_HIT_* mask. */
 uint32_t voice_infer_feed(const int16_t *pcm, size_t n);
 
+/* Recording path: run frontend + confirm model ONLY (no wake, no VAD)
+ * on raw PCM, so a spoken "yes" can end-point a hands-free recording.
+ * True on detection. No-op (false) without a confirm model. */
+bool voice_infer_feed_confirm(const int16_t *pcm, size_t n);
+/* Fresh confirm streaming state before a recording starts. */
+void voice_infer_confirm_restart(void);
+
 #ifdef __cplusplus
 }
 #endif

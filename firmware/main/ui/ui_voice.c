@@ -11,6 +11,7 @@ static lv_obj_t *s_hint;      /* standing "say yes" instruction  */
 static void close_clicked(lv_event_t *e)
 {
     LV_UNUSED(e);
+    if (g_ui.cb.voice_cancel) g_ui.cb.voice_cancel();
     ui_voice_close();
 }
 
