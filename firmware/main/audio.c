@@ -19,6 +19,7 @@ static const char *TAG = "audio";
 
 typedef enum { CMD_REC_START, CMD_REC_STOP, CMD_REC_CANCEL,
                CMD_PLAY, CMD_STOP, CMD_CHIME,
+               CMD_VOICE_TIMEOUT,   /* answer window expired (voice.c) */
                CMD_NOP /* wake the task so it re-reads s_listen_want */
 } cmd_id_t;
 #define AF_PROMPT 0x01   /* play: completion -> prompt_done, no progress */
@@ -399,6 +400,9 @@ static void handle_cmd(const cmd_t *c)
                                                   discard the finished file */
             remove(OUTBOX_DIR "/rec_tmp.vmsg");
             break;
+        case CMD_VOICE_TIMEOUT:
+            if (s_ev.voice_timeout) s_ev.voice_timeout();
+            break;
         default: break;   /* stray STOPs / NOPs ignored when idle */
     }
 }
@@ -494,6 +498,11 @@ void audio_play_prompt(const char *path)
     cmd_t c = { .id = CMD_PLAY, .flags = AF_PROMPT };
     strlcpy(c.path, path, sizeof(c.path));
     xQueueSend(s_q, &c, 0);
+}
+
+void audio_voice_timeout(void)
+{
+    post(CMD_VOICE_TIMEOUT, NULL);
 }
 
 void audio_record_start_vad(void)

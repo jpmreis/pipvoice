@@ -57,3 +57,9 @@ CONFIG_LWIP_IPV4_NAPT=y
 # RAM - MQTT's resident session left sync's HTTPS handshakes failing with
 # alloc errors inside RSA verify (PK verify 0x4290)
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# Backstop for the voice answer-window timer: the flow itself runs on the
+# audio task (voice.c timer_cb relays via audio_voice_timeout), but any
+# residual esp_timer-context work near LVGL deserves headroom - the 3.5 KB
+# default overflowed once when a timeout path crossed leave_ambient()
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=6144

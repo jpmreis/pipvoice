@@ -107,6 +107,7 @@ static void session_end(void)
 {
     window_close();
     s_state = V_IDLE;
+    power_hold(false);
     VUI(ui_voice_close());
 }
 
@@ -186,6 +187,8 @@ static void step_wake(void)
     }
 
     power_user_activity();                 /* light the panel, drop shield */
+    power_hold(true);                      /* and keep it lit: a long
+                                              message outlives the dim timer */
     audio_play_chime(CHIME_PROMPT);        /* wake ack */
     ESP_LOGI(TAG, "session: %u contacts, %u unheard", n, s_unheard_count);
     if (s_unheard_count) {
@@ -305,12 +308,20 @@ void voice_on_record_done(uint16_t duration_s)
     UNLOCK();
 }
 
-static void timer_cb(void *arg)
+void voice_on_timeout(void)
 {
-    (void)arg;
     LOCK();
     answer_timeout();
     UNLOCK();
+}
+
+static void timer_cb(void *arg)
+{
+    /* esp_timer task: its stack is a few KB and answer_timeout() plays
+     * prompts, updates LVGL, and can climb out of the sleep screen -
+     * that once overflowed it. Relay to the audio task and do it there. */
+    (void)arg;
+    audio_voice_timeout();
 }
 
 /* ---------------- lifecycle ---------------- */
@@ -331,6 +342,7 @@ void voice_cancel(void)
             s_app.record_cancel();
         window_close();
         s_state = V_IDLE;
+        power_hold(false);
         audio_stop();
     }
     UNLOCK();

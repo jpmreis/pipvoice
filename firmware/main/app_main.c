@@ -480,6 +480,7 @@ void app_main(void)
         .play_done = ev_play_done,
         .voice_hits = voice_on_hits,       /* audio task -> voice flow  */
         .prompt_done = voice_on_prompt_done,
+        .voice_timeout = voice_on_timeout,
     };
     audio_init(&audio_ev);
     HEAPLOG("audio");

@@ -10,11 +10,13 @@ typedef struct {
     void (*record_done)(uint16_t duration_s);     /* stopped or limit hit  */
     void (*play_progress)(uint16_t pos_s, uint16_t total_s);
     void (*play_done)(void);
-    /* voice control (both fired from the audio task, may be NULL):
-     * detections while listening (VOICE_HIT_* in voice_infer.h), and
-     * completion of an audio_play_prompt() playback */
+    /* voice control (all fired from the audio task, may be NULL):
+     * detections while listening (VOICE_HIT_* in voice_infer.h),
+     * completion of an audio_play_prompt() playback, and the answer-
+     * window timeout relayed via audio_voice_timeout() */
     void (*voice_hits)(uint32_t mask);
     void (*prompt_done)(void);
+    void (*voice_timeout)(void);
 } audio_events_t;
 
 void audio_init(const audio_events_t *ev);
@@ -51,3 +53,8 @@ void audio_play_prompt(const char *path);
 /* Start a recording that auto-stops on trailing silence (voice flow);
  * reported through record_done like any other recording. */
 void audio_record_start_vad(void);
+/* Relay a voice answer-window timeout onto the audio task, which fires
+ * events.voice_timeout there. The esp_timer task's stack is far too
+ * small for the prompt/UI work a timeout kicks off (a session under the
+ * sleep screen once overflowed it mid-leave_ambient). */
+void audio_voice_timeout(void);

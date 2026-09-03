@@ -41,3 +41,4 @@ void voice_cancel(void);
 void voice_on_hits(uint32_t mask);          /* VOICE_HIT_* (voice_infer.h) */
 void voice_on_prompt_done(void);
 void voice_on_record_done(uint16_t duration_s);
+void voice_on_timeout(void);                /* audio_events_t.voice_timeout */

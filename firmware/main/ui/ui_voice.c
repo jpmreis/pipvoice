@@ -63,6 +63,10 @@ lv_obj_t *scr_voice_create(void)
 
 void ui_voice_show(const char *line1, const char *line2)
 {
+    /* A voice wake makes no touch input, but the power ladder re-decides
+     * dim/ambient every second from LVGL's inactivity clock - without
+     * this, the sleep screen climbs back on top of an active session. */
+    lv_display_trigger_activity(NULL);
     lv_label_set_text(s_line1, line1 ? line1 : "");
     lv_label_set_text(s_line2, line2 ? line2 : "");
     if (!ui_screen_is(SCR_VOICE) && !nav_locked_out())

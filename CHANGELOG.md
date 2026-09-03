@@ -12,6 +12,31 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.4] — 2026-09-03
+
+Retrained voice models and two session fixes.
+
+### Changed
+- Both keyword models retrained to full length (the 1.3.x models were
+  early-stopped and scored soft — see 1.3.2). The wake word is now
+  pronunciation-tolerant: *hey peep*, *hey peap*, and short/long pauses
+  between "hey" and "pip" are trained as accepted variants ("hey pap"
+  stays a must-reject). On the same bench recording the new wake model
+  scores 0.9 where the old one managed 0.64, and catches all four
+  spoken repetitions where the old model heard two. Cutoffs re-benched:
+  wake 0.45, confirm 0.10.
+
+### Fixed
+- The sleep screen no longer climbs back over an active voice session:
+  voice-screen updates now count as user activity for the power ladder,
+  and a session holds the panel awake end to end (a long message used
+  to outlast the dim timer).
+- Crash fix: the answer-window timeout ran prompt playback and screen
+  updates on the tiny esp_timer stack, and overflowed it (reboot
+  mid-session) when a timeout had to climb out of the sleep screen. The
+  timeout is now relayed to the audio task, and the esp_timer stack got
+  headroom as a backstop.
+
 ## [1.3.3] — 2026-09-03
 
 First real-use feedback on hands-free voice control, same-day fixes.
