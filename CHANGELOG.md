@@ -12,6 +12,32 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.5] — 2026-09-03
+
+Louder, cleaner speaker. An amplitude survey of real messages showed
+every source peaking at full scale but averaging ~20 dB below it — the
+speaker's clean ceiling was spent on transients, and volume 100
+overdrove the DAC into clipping on top.
+
+### Fixed
+- Volume 100 is now the loudest *clean* output. The ES8311 driver adds
+  +3.6 dB of hardware-gain compensation to every requested volume, so
+  the default curve ran the DAC at +3.6 dB digital gain at full volume
+  and hard-clipped anything mastered near full scale — box recordings
+  and iPhone peaks alike. The custom volume curve tops out where the
+  chip lands on exactly 0 dB.
+
+### Changed
+- Messages are loudness-normalized at ingest on the server: static gain
+  toward a −14 dBFS mean with a −1 dBFS lookahead limiter (no pumping,
+  no noise-floor breathing). Phone recordings come up ~4–5 dB, quiet
+  box recordings up to +12 dB, and hot close-talk box recordings come
+  down — which also softens their baked-in limiter crunch on playback.
+  Box uploads are decoded and re-encoded once for this; recordings
+  already at level pass through untouched, and any processing failure
+  stores the original audio unchanged. Voice prompts inherit the same
+  level when (re)rendered.
+
 ## [1.3.4] — 2026-09-03
 
 Retrained voice models and two session fixes.

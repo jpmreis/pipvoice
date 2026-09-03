@@ -435,6 +435,22 @@ void audio_init(const audio_events_t *ev)
     if (!s_spk || !s_mic)
         ESP_LOGE(TAG, "codec init failed (spk=%p mic=%p)", s_spk, s_mic);
     s_codec_ok = s_spk && s_mic;
+    if (s_spk) {
+        /* Volume 100 must be the loudest *clean* output. The BSP declares
+         * pa_voltage 5.0 / codec_dac_voltage 3.3, so the es8311 driver adds
+         * +3.6 dB to every requested volume (db_value -= hw_gain) - with the
+         * default curve topping at 0 dB the DAC ran at +3.6 dB digital gain
+         * at volume 100 and hard-clipped anything mastered near full scale
+         * (all box recordings, iPhone peaks). Top the curve at -3.6 dB so
+         * the chip lands on exactly 0 dB at 100; same -50 dB floor and
+         * slope shape as the driver default. */
+        esp_codec_dev_vol_map_t vol_map[2] = {
+            { .vol = 0,   .db_value = -50.0 },
+            { .vol = 100, .db_value = -3.6  },
+        };
+        esp_codec_dev_vol_curve_t curve = { .vol_map = vol_map, .count = 2 };
+        esp_codec_dev_set_vol_curve(s_spk, &curve);
+    }
     /* libopus (SILK, fixed-point) burns ~25 KB of stack in opus_encode -
      * 8 KB overflowed the moment recording started. Must stay internal
      * RAM: this task also writes flash (LittleFS) with cache disabled.

@@ -51,14 +51,90 @@ def _ffmpeg_decode(data: bytes) -> bytes:
     return p.stdout
 
 
-def transcode_to_vmsg(data: bytes, max_seconds: int) -> tuple[bytes, int]:
-    """Browser upload -> (vmsg bytes, duration seconds). Raises ValueError
-    on undecodable audio or over-length recordings."""
-    pcm = _ffmpeg_decode(data)
-    duration_s = len(pcm) // (SAMPLE_RATE * 2)
-    if duration_s > max_seconds:
-        raise ValueError(f"recording longer than {max_seconds}s limit")
+# ---- ingest loudness normalization ----
+# Prod finding 2026-09-03 (amplitude survey of 26 messages): every source
+# masters peaks at/near 0 dBFS but average level around -20 dBFS, so the
+# box speaker's clean ceiling is spent on transients and everything sounds
+# quiet; hot box recordings additionally sit 10% of samples in the limiter
+# zone. Fix at ingest, once, for every source: static gain toward a target
+# mean level, with a lookahead limiter absorbing the peaks that gain pushes
+# over the ceiling. Static gain (not dynamic normalization) on purpose -
+# no pumping, no noise-floor breathing between words.
+TARGET_MEAN_DB = -14.0     # volumedetect mean_volume target (incl. pauses)
+PEAK_CEILING_DB = -1.0     # true ceiling after the limiter
+LIMITER_GIVE_DB = 8.0      # how far past peak-fit the limiter may absorb
+MAX_BOOST_DB = 12.0        # don't amplify room tone into hiss
+MAX_CUT_DB = -6.0          # tame hot recordings, don't crush them
 
+
+def _measure_pcm(pcm: bytes, sr: int) -> tuple[float, float]:
+    """(mean_volume dB, max_volume dB) of raw s16 mono via volumedetect."""
+    p = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-f", "s16le", "-ar", str(sr), "-ac", "1",
+         "-i", "pipe:0", "-af", "volumedetect", "-f", "null", "-"],
+        input=pcm, capture_output=True)
+    mean_db = max_db = None
+    for line in p.stderr.decode(errors="replace").splitlines():
+        if "mean_volume:" in line:
+            mean_db = float(line.split("mean_volume:")[1].split("dB")[0])
+        elif "max_volume:" in line:
+            max_db = float(line.split("max_volume:")[1].split("dB")[0])
+    if mean_db is None or max_db is None:
+        raise ValueError("volumedetect produced no measurement")
+    return mean_db, max_db
+
+
+def normalize_pcm(pcm: bytes, sr: int = SAMPLE_RATE) -> bytes:
+    """Level-normalize raw s16 mono PCM. Returns the input unchanged when
+    the level is already right or anything goes wrong - loudness is never
+    worth losing a message over."""
+    try:
+        mean_db, max_db = _measure_pcm(pcm, sr)
+        gain = min(TARGET_MEAN_DB - mean_db,
+                   PEAK_CEILING_DB - max_db + LIMITER_GIVE_DB)
+        gain = max(min(gain, MAX_BOOST_DB), MAX_CUT_DB)
+        if abs(gain) < 1.0:
+            return pcm
+        limit = 10.0 ** (PEAK_CEILING_DB / 20.0)
+        p = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error",
+             "-f", "s16le", "-ar", str(sr), "-ac", "1", "-i", "pipe:0",
+             "-af", f"volume={gain:.1f}dB,"
+                    f"alimiter=level=false:limit={limit:.3f}",
+             "-f", "s16le", "-ar", str(sr), "-ac", "1", "pipe:1"],
+            input=pcm, capture_output=True)
+        if p.returncode != 0 or not p.stdout:
+            raise ValueError(p.stderr.decode(errors="replace")[-200:])
+        log.info("normalized: mean %.1f max %.1f -> gain %+.1f dB",
+                 mean_db, max_db, gain)
+        return p.stdout
+    except Exception as e:
+        log.warning("normalization skipped: %s", e)
+        return pcm
+
+
+def normalize_vmsg(data: bytes) -> bytes:
+    """Level-normalize a box-recorded .vmsg at ingest: decode, normalize,
+    re-encode. The tandem 16 kbps Opus generation is the price of a level
+    fix the firmware can't do; when the level is already right (gain under
+    the 1 dB threshold) the original bytes pass through untouched, and any
+    failure also returns them untouched."""
+    try:
+        pcm, sr = _vmsg_to_pcm(data)
+        if not pcm:
+            return data
+        out = normalize_pcm(pcm, sr)
+        if out is pcm:                      # already at level: keep the
+            return data                     # original single-generation opus
+        _ver, _sr100, _frame_ms, dur = struct.unpack_from("<4H", data, 4)
+        return _encode_vmsg(out, dur)
+    except Exception as e:
+        log.warning("vmsg normalization skipped: %s", e)
+        return data
+
+
+def _encode_vmsg(pcm: bytes, duration_s: int) -> bytes:
+    """Raw s16 mono 16 kHz PCM -> vmsg bytes (firmware encoder settings)."""
     enc = opuslib.Encoder(SAMPLE_RATE, 1, opuslib.APPLICATION_VOIP)
     try:
         # mirror the firmware encoder (opus_file.c). These CTLs fail on
@@ -68,9 +144,7 @@ def transcode_to_vmsg(data: bytes, max_seconds: int) -> tuple[bytes, int]:
         enc.complexity = 3
         enc.signal = opuslib.SIGNAL_VOICE
     except opuslib.OpusError:
-        import logging
-        logging.getLogger("vmsg").warning(
-            "opus encoder CTLs unavailable; using libopus defaults")
+        log.warning("opus encoder CTLs unavailable; using libopus defaults")
 
     out = bytearray(b"VMSG")
     out += struct.pack("<4H", 1, SAMPLE_RATE // 100, FRAME_MS,
@@ -82,7 +156,18 @@ def transcode_to_vmsg(data: bytes, max_seconds: int) -> tuple[bytes, int]:
         out += struct.pack("<H", len(pkt)) + pkt
     if len(out) <= 12:
         raise ValueError("empty recording")
-    return bytes(out), duration_s
+    return bytes(out)
+
+
+def transcode_to_vmsg(data: bytes, max_seconds: int) -> tuple[bytes, int]:
+    """Browser upload -> (vmsg bytes, duration seconds). Raises ValueError
+    on undecodable audio or over-length recordings."""
+    pcm = _ffmpeg_decode(data)
+    duration_s = len(pcm) // (SAMPLE_RATE * 2)
+    if duration_s > max_seconds:
+        raise ValueError(f"recording longer than {max_seconds}s limit")
+    pcm = normalize_pcm(pcm)
+    return _encode_vmsg(pcm, duration_s), duration_s
 
 
 def _vmsg_to_pcm(data: bytes) -> tuple[bytes, int]:

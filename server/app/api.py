@@ -656,6 +656,11 @@ async def send_message(bg: BackgroundTasks,
                 vmsg.transcode_to_vmsg, data, MAX_MSG_S)
         except ValueError as e:
             raise HTTPException(400, str(e))
+    else:
+        # box recording: level-normalize at ingest (decode -> gain/limit ->
+        # re-encode; see vmsg.normalize_pcm). Same single-worker reasoning
+        # as above. Never fatal - on any failure the original bytes stand.
+        data = await asyncio.to_thread(vmsg.normalize_vmsg, data)
 
     # ms-timestamp prefix + random suffix: still 32 hex chars, but ids sort
     # chronologically - device inbox ordering relies on this (storage.c)
