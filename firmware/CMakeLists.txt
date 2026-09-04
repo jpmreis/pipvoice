@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-set(PROJECT_VER "1.3.6")
+set(PROJECT_VER "1.3.7")
 
 # Target board (server boards.py key): amoled-1.8 | amoled-1.75b | amoled-2.16.
 # Selects the UI geometry block (main/ui/ui_geometry.h) and PIP_BOARD_NAME;

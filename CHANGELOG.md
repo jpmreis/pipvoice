@@ -12,6 +12,38 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.7] — 2026-09-04
+
+A server and PWA housekeeping release. The firmware is identical to
+1.3.6 apart from its version stamp — boxes will update, but nothing
+about them changes. Activating it is what pushes the refreshed PWA to
+every phone.
+
+### Added
+- Admin firmware page shows each release's notes (releases now embed
+  their CHANGELOG section in `manifest.json`, and the server stores its
+  first paragraph) and lays out activation as one row per version with
+  a status/Activate column per board model.
+- The PWA background picker lives on its own Background screen, opened
+  from Settings, instead of crowding the settings page.
+
+### Changed
+- Admin cleanup: the fetch-release card leads the firmware page, the
+  Permissions tab is gone from the nav (device admins manage contacts
+  from their PWA), the devices page drops the per-row web-flash link
+  and the bottom provision form (both live in the PWA's "Set up a new
+  Pip"), and the users page separates phone users from device users.
+
+### Fixed
+- PWA updates now actually reach phones: `/app` shell files are served
+  `no-cache` (fonts/icons/vendored assets keep long lifetimes, now set
+  by the app rather than Caddy). Without any `Cache-Control`, iOS
+  heuristically cached the old shell and served it without revalidating
+  — even force-quitting the app kept months-old JavaScript until the
+  next version bump.
+- The manage-device screen's voice-control label wraps inside the card
+  instead of running off the right edge of the screen.
+
 ## [1.3.6] — 2026-09-04
 
 Multi-board firmware: one release now ships a build for every Pip
