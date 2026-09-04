@@ -12,6 +12,39 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.6] — 2026-09-04
+
+Multi-board firmware: one release now ships a build for every Pip
+model — the original 1.8″ rectangle, the round 1.75″ and the square
+2.16″. The new models are buildable and web-flashable end to end but
+have not yet been bench-tested on hardware; the 1.8″ build is
+pixel-identical to 1.3.5's layout.
+
+### Added
+- Per-board UI geometry (`ui_geometry.h`, selected by
+  `-DPIP_BOARD=<model>`): every screen adapts per panel. The round
+  1.75″ gets circle-aware layouts — centred header and status
+  clusters, chord-fitted buttons, a re-derived ambient burn-in grid,
+  circular theme thumbnails and a larger splash wordmark; the 2.16″
+  scales the familiar anatomy up (bigger tiles, 4-column theme
+  picker).
+- Firmware builds for the AMOLED 1.75-B and 2.16 boards (their BSPs on
+  ESP-IDF v5.5; the 1.8 stays on v5.4). Same speaker path; the new
+  boards record through the ES7210 mic array (gain staging carried
+  over, to be tuned on hardware).
+- Background themes now render in four sizes: one per board plus the
+  PWA's. Devices fetch their own panel's rendition; the picker
+  thumbnails are per-board too.
+
+### Changed
+- Releases build a matrix of all three boards and publish one manifest
+  with a build per model; the server ingests every build and each
+  model activates (rolls out) independently. A box only ever sees its
+  own model's binaries — OTA and the web flasher both key on the board
+  recorded at provisioning.
+- The setup page's model picker unlocks a board the moment an active
+  firmware exists for it.
+
 ## [1.3.5] — 2026-09-03
 
 Louder, cleaner speaker. An amplitude survey of real messages showed
