@@ -99,7 +99,7 @@ static void open_overlay(void)
     lv_obj_set_style_radius(panel, 20, 0);
     lv_obj_set_style_pad_all(panel, 18, 0);
     lv_obj_set_style_pad_row(panel, 14, 0);
-    lv_obj_set_size(panel, SCREEN_W - 40, LV_SIZE_CONTENT);
+    lv_obj_set_size(panel, GEO_MODAL_W, LV_SIZE_CONTENT);
     lv_obj_center(panel);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,

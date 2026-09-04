@@ -104,7 +104,7 @@ void scr_react_open(const ui_message_t *m)
     lv_obj_set_style_pad_all(panel, 16, 0);
     lv_obj_set_style_pad_row(panel, 12, 0);
     lv_obj_set_style_pad_column(panel, 10, 0);
-    lv_obj_set_size(panel, SCREEN_W - 24, LV_SIZE_CONTENT);
+    lv_obj_set_size(panel, GEO_REACT_W, LV_SIZE_CONTENT);
     lv_obj_center(panel);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_SPACE_EVENLY,
@@ -172,9 +172,9 @@ void ui_notify_reaction(const char *from_name, const char *key)
     lv_obj_set_style_border_color(box, COL_ACCENT, 0);
     lv_obj_set_style_pad_all(box, 12, 0);
     lv_obj_set_style_pad_column(box, 10, 0);
-    lv_obj_set_width(box, SCREEN_W - 40);
+    lv_obj_set_width(box, GEO_TOAST_W);
     lv_obj_set_height(box, LV_SIZE_CONTENT);
-    lv_obj_align(box, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_align(box, LV_ALIGN_TOP_MID, 0, GEO_TOAST_Y);
     lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

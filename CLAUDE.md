@@ -10,11 +10,21 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
 
 ## Toolchain
 
-- ESP-IDF **v5.4.4** (e.g. at `~/esp/esp-idf-v5.4`); activate with
-  `. ~/esp/esp-idf-v5.4/export.sh`, then `idf.py build` in `firmware/`.
+- Per-board IDF: **v5.4.4** for the amoled-1.8 (`~/esp/esp-idf-v5.4`),
+  **v5.5.5** for amoled-1.75b / amoled-2.16 (`~/esp/esp-idf-v5.5` — their
+  BSPs have no ≤5.4 release). Activate the matching `export.sh`, then
+  `idf.py [-B build-<board>] [-DPIP_BOARD=<board>] build` in `firmware/`
+  (default board = amoled-1.8, plain `idf.py build`, unchanged).
 - IDF 5.3 cannot resolve deps (BSP ≥2.0.1 needs esp_lcd_co5300 2.x → IDF
-  ≥5.4). IDF 5.5.x has an ES8311 mic-silence regression — stay on 5.4.x.
-- `firmware/dependencies.lock` is committed on purpose (reproducible builds).
+  ≥5.4). IDF 5.5.x has an ES8311 **analog-mic** silence regression — the
+  1.8 stays on 5.4.x; the new boards record via ES7210 (unaffected, but
+  not yet bench-verified).
+- `firmware/dependencies.lock` is committed on purpose (reproducible
+  builds) and belongs to the **1.8** manifest; building another board
+  locally rewrites it — `git restore dependencies.lock` afterwards.
+  `main/idf_component.yml` is generated per board from the tracked
+  `idf_component.<board>.yml` (the three BSPs export identically named
+  headers, so only one can be a dependency).
 - `firmware/sdkconfig` is **gitignored**; only `sdkconfig.defaults` is
   tracked. Any deliberate setting must go in sdkconfig.defaults or it
   silently vanishes on regeneration.
@@ -28,17 +38,22 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
 - **Normal path (since CI releases landed)**: bump `PROJECT_VER` + add
   the CHANGELOG section → commit → `git tag v<version> && git push
   origin v<version>`. CI (`.github/workflows/release.yml`) verifies
-  tag == PROJECT_VER, builds on IDF v5.4.4, and publishes a GitHub
-  Release: `pip-<ver>.bin` + bootloader + parttable + `manifest.json`
-  (ESP Web Tools-superset with sha256 per part;
-  `firmware/tools/make_manifest.py`). Admin Firmware page → **Fetch
-  latest release** (hash-verified, installs inactive;
-  `server/app/release.py`, `PIP_RELEASE_MANIFEST` for forks) →
-  **Activate**. Activation publishes a **retained** QoS1 MQTT notify:
-  online boxes update in seconds, offline boxes on reconnect.
+  tag == PROJECT_VER and builds a **matrix of all three boards** (1.8
+  on IDF v5.4.4; 1.75b/2.16 on v5.5.5), publishing ONE GitHub Release:
+  per-board `pip-<ver>[-<board>].bin` + bootloader + parttable (bare
+  names = the 1.8, legacy-compatible) + one `manifest.json` with a
+  `builds[]` entry per board (ESP Web Tools-superset with sha256 per
+  part; `firmware/tools/make_manifest.py`). Admin Firmware page →
+  **Fetch latest release** (hash-verified, ingests every board's build,
+  installs inactive; `server/app/release.py`, `PIP_RELEASE_MANIFEST`
+  for forks) → **Activate per model** (active is per board; firmware
+  table PK is (version, board)). Activation publishes a **retained**
+  QoS1 MQTT notify: online boxes update in seconds, offline boxes on
+  reconnect (wrong-board notifies are no-ops - OTA filters by the
+  device row's board).
 - Dev fallback: `POST /admin/firmware` (multipart: version, notes,
-  file, bootloader, parttable, activate) — the admin page has no upload
-  form anymore. A complete web-flash bundle needs the bootloader +
+  file, bootloader, parttable, activate, board) — the admin page has no
+  upload form anymore. A complete web-flash bundle needs the bootloader +
   partition-table files (the flasher falls back to the newest version
   that has them); CI bundles are always complete.
 - The old hazard this replaces: a local dirty-tree build once shipped

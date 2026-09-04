@@ -69,11 +69,13 @@ lv_obj_t *scr_splash_create(void)
     lv_obj_set_style_pad_column(cont, 3, 0);
     lv_obj_align(cont, LV_ALIGN_CENTER, 0, -28);
 
+    /* FONT_SPLASH: FONT_BIG on the rect panels; the round board grows
+     * the wordmark into the circle (montserrat 48, per-board sdkconfig) */
     static const char *txt[3] = { "P", "i", "p" };
     for (int i = 0; i < 3; i++) {
         s_letters[i] = lv_label_create(cont);
         lv_label_set_text(s_letters[i], txt[i]);
-        lv_obj_set_style_text_font(s_letters[i], FONT_BIG, 0);
+        lv_obj_set_style_text_font(s_letters[i], FONT_SPLASH, 0);
         lv_obj_set_style_text_color(s_letters[i], COL_TEXT, 0);
         lv_obj_set_style_opa(s_letters[i], LV_OPA_TRANSP, 0);
     }
@@ -109,7 +111,7 @@ lv_obj_t *scr_splash_create(void)
     lv_obj_set_style_text_color(s_hello, COL_TEXT_DIM, 0);
     lv_obj_set_style_opa(s_hello, LV_OPA_TRANSP, 0);
     lv_label_set_text(s_hello, "Hello");
-    lv_obj_align(s_hello, LV_ALIGN_BOTTOM_MID, 0, -56);
+    lv_obj_align(s_hello, LV_ALIGN_BOTTOM_MID, 0, GEO_SPLASH_HELLO_DY);
 
     return s_scr;
 }
@@ -122,13 +124,13 @@ static void show_base(void)
 {
     if (g_ui.owner_name[0])
         lv_label_set_text_fmt(s_hello, "Hello %s", g_ui.owner_name);
-    lv_obj_align(s_hello, LV_ALIGN_BOTTOM_MID, 0, -56);
+    lv_obj_align(s_hello, LV_ALIGN_BOTTOM_MID, 0, GEO_SPLASH_HELLO_DY);
 
     /* letters drop in from above, staggered, with a springy overshoot */
     for (int i = 0; i < 3; i++) {
         lv_obj_set_style_opa(s_letters[i], LV_OPA_TRANSP, 0);
         uint32_t d = 80 + (uint32_t)i * 140;
-        anim(s_letters[i], -240, 0, d, 450, a_ty, lv_anim_path_overshoot);
+        anim(s_letters[i], -GEO_SPLASH_DROP, 0, d, 450, a_ty, lv_anim_path_overshoot);
         anim(s_letters[i], LV_OPA_TRANSP, LV_OPA_COVER, d, 180, a_opa,
              lv_anim_path_linear);
     }
@@ -163,7 +165,7 @@ void scr_splash_show(void)
     /* the amber dot bounces down and settles as the wordmark's period */
     dot_style_reset();
     lv_obj_set_style_opa(s_dot, LV_OPA_TRANSP, 0);
-    anim(s_dot, -260, DOT_REST_TY, 560, 650, a_ty, lv_anim_path_bounce);
+    anim(s_dot, -GEO_SPLASH_DOT_DROP, DOT_REST_TY, 560, 650, a_ty, lv_anim_path_bounce);
     anim(s_dot, LV_OPA_TRANSP, LV_OPA_COVER, 560, 120, a_opa,
          lv_anim_path_linear);
 }

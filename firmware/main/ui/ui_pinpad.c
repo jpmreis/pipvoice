@@ -81,13 +81,13 @@ lv_obj_t *scr_pinpad_create(void)
 
     s_msg = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_msg, FONT_BODY, 0);
-    lv_obj_align(s_msg, LV_ALIGN_TOP_MID, 0, 26);
+    lv_obj_align(s_msg, LV_ALIGN_TOP_MID, 0, GEO_PIN_MSG_Y);
 
     /* dots */
     lv_obj_t *row = lv_obj_create(s_scr);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, SCREEN_W, 30);
-    lv_obj_align(row, LV_ALIGN_TOP_MID, 0, 62);
+    lv_obj_align(row, LV_ALIGN_TOP_MID, 0, GEO_PIN_DOTS_Y);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -107,14 +107,14 @@ lv_obj_t *scr_pinpad_create(void)
 
     lv_obj_t *pad = lv_obj_create(s_scr);
     lv_obj_remove_style_all(pad);
-    lv_obj_set_size(pad, 300, 348);
-    lv_obj_align(pad, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_set_size(pad, GEO_PAD_W, GEO_PAD_H);
+    lv_obj_align(pad, LV_ALIGN_BOTTOM_MID, 0, -GEO_PAD_BOTTOM);
     lv_obj_set_flex_flow(pad, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(pad, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER);
 
     for (int i = 0; i < 12; i++) {
-        lv_obj_t *btn = mk_round_button(pad, 80, COL_SURFACE,
+        lv_obj_t *btn = mk_round_button(pad, GEO_KEY_D, COL_SURFACE,
                                         key_clicked, (void *)vals[i]);
         lv_obj_t *l = lv_label_create(btn);
         lv_label_set_text(l, keys[i]);

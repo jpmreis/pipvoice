@@ -17,7 +17,7 @@
 
 static const char *TAG = "theme";
 
-#define THEME_BG_BYTES (368 * 448 * 2)   /* raw RGB565, panel-sized */
+#define THEME_BG_BYTES (SCREEN_W * SCREEN_H * 2)  /* raw RGB565, panel-sized */
 #define THEME_TMP_FILE STORAGE_ROOT "/theme_bg.tmp"
 
 static uint16_t *s_px;                   /* PSRAM, allocated once, kept */

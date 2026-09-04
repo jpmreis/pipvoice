@@ -73,7 +73,8 @@ static lv_obj_t *mk_tile(uintptr_t idx, bool selected)
     lv_obj_t *btn = lv_button_create(s_grid);
     lv_obj_remove_style_all(btn);
     lv_obj_set_size(btn, UI_THEME_THUMB_W, UI_THEME_THUMB_H);
-    lv_obj_set_style_radius(btn, 12, 0);
+    /* round board: circular thumbs (the panel crop the server renders) */
+    lv_obj_set_style_radius(btn, GEO_THUMB_ROUND ? LV_RADIUS_CIRCLE : 12, 0);
     lv_obj_set_style_clip_corner(btn, true, 0);
     lv_obj_set_style_bg_color(btn, COL_SURFACE, 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -153,9 +154,9 @@ lv_obj_t *scr_theme_picker_create(void)
 
     s_grid = lv_obj_create(s_scr);
     lv_obj_remove_style_all(s_grid);
-    /* 3 x 108 tiles + 2 x 10 gaps = 344 */
-    lv_obj_set_size(s_grid, 344, SCREEN_H - 64);
-    lv_obj_align(s_grid, LV_ALIGN_BOTTOM_MID, 0, -6);
+    /* GEO_PICKER_COLS tiles + 10 px gaps (1.8: 3x108 + 2x10 = 344) */
+    lv_obj_set_size(s_grid, GEO_PICKER_W, GEO_PICKER_H);
+    lv_obj_align(s_grid, LV_ALIGN_TOP_MID, 0, GEO_PICKER_TOP);
     lv_obj_set_flex_flow(s_grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_pad_row(s_grid, 10, 0);
     lv_obj_set_style_pad_column(s_grid, 10, 0);

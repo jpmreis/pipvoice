@@ -1,4 +1,5 @@
 #include "net_http.h"
+#include "board.h"      /* PIP_BOARD_NAME for theme rendition selection */
 #include "config.h"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
@@ -147,17 +148,22 @@ static bool download_to_file(const char *path, const char *dest_path)
     return ok;
 }
 
+/* board= selects the panel-sized rendition (server themes.py; an old
+ * server ignores the query and serves the 1.8 bin - theme.c's byte-count
+ * guard rejects it on other panels rather than painting garbage) */
 bool http_download_theme(const char *name, const char *dest_path)
 {
-    char path[96];
-    snprintf(path, sizeof(path), "/themes/%s/device.bin", name);
+    char path[112];
+    snprintf(path, sizeof(path), "/themes/%s/device.bin?board=%s",
+             name, PIP_BOARD_NAME);
     return download_to_file(path, dest_path);
 }
 
 bool http_download_theme_thumb(const char *name, const char *dest_path)
 {
-    char path[96];
-    snprintf(path, sizeof(path), "/themes/%s/thumb.bin", name);
+    char path[112];
+    snprintf(path, sizeof(path), "/themes/%s/thumb.bin?board=%s",
+             name, PIP_BOARD_NAME);
     return download_to_file(path, dest_path);
 }
 

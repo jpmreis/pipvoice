@@ -6,12 +6,15 @@
  *   - app -> UI: ui_* functions below (call from the LVGL task/lock)
  *   - UI -> app: ui_callbacks_t function pointers, registered at init
  *
- * Target: Waveshare ESP32-S3-Touch-AMOLED-1.8 (368x448, SH8601/FT3168), LVGL 9.
+ * Targets: Waveshare ESP32-S3-Touch-AMOLED boards (1.8 / 1.75-B / 2.16),
+ * LVGL 9. Panel geometry comes from ui_geometry.h, selected per board at
+ * compile time (-DPIP_BOARD=<key>).
  */
 #ifndef PIP_UI_H
 #define PIP_UI_H
 
 #include "lvgl.h"
+#include "ui_geometry.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -62,10 +65,10 @@ typedef enum {
 
 #define UI_THEME_VER_LEN  12   /* 8-hex server content hash + NUL */
 
-/* picker thumbnail geometry: 3-column grid on the 368px panel, same
- * 368:448 aspect as the panel; must match the server's THUMB_W/H */
-#define UI_THEME_THUMB_W     108
-#define UI_THEME_THUMB_H     132
+/* picker thumbnail geometry: per board (ui_geometry.h); must match the
+ * server's per-board thumb sizes in themes.py THUMBS */
+#define UI_THEME_THUMB_W     GEO_THUMB_W
+#define UI_THEME_THUMB_H     GEO_THUMB_H
 #define UI_THEME_THUMB_BYTES (UI_THEME_THUMB_W * UI_THEME_THUMB_H * 2)
 
 typedef struct {
@@ -133,8 +136,8 @@ void ui_set_dnd(bool on, uint8_t until_hour);
 void ui_set_themes(const ui_theme_info_t *list, uint8_t count);
 
 /* Apply (or clear, px == NULL) the background on home/record/inbox.
- * px: 368x448 RGB565 little-endian, caller-owned, must stay alive while
- * set (it is referenced, not copied). */
+ * px: SCREEN_W x SCREEN_H RGB565 little-endian, caller-owned, must stay
+ * alive while set (it is referenced, not copied). */
 void ui_set_background(const uint16_t *px, const char *name, bool black_text);
 
 /* A background is being fetched (name) or the fetch ended (""): the

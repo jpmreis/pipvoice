@@ -84,8 +84,8 @@ void ui_open_record_recent(void)
 {
     if (nav_locked_out() || g_ui.contact_count == 0) return;
     lv_display_trigger_activity(NULL);
-    strncpy(g_ui.selected_contact_id, g_ui.contacts[0].id, UI_ID_LEN - 1);
-    strncpy(g_ui.selected_contact_name, g_ui.contacts[0].name, UI_NAME_LEN - 1);
+    strlcpy(g_ui.selected_contact_id, g_ui.contacts[0].id, UI_ID_LEN);
+    strlcpy(g_ui.selected_contact_name, g_ui.contacts[0].name, UI_NAME_LEN);
     ui_react_mark_seen(g_ui.selected_contact_id);
     scr_record_show();
     nav_to(SCR_RECORD, LV_SCR_LOAD_ANIM_MOVE_LEFT);
@@ -208,7 +208,7 @@ void ui_ambient_wake_to_splash(void)
 /* ---------------- data setters ---------------- */
 void ui_set_owner_name(const char *name)
 {
-    strncpy(g_ui.owner_name, name, UI_NAME_LEN - 1);
+    strlcpy(g_ui.owner_name, name, UI_NAME_LEN);
     scr_home_refresh();
 }
 
@@ -286,8 +286,8 @@ void ui_set_peer_recording(const char *from_id, const char *from_name,
                            bool active)
 {
     if (active) {
-        strncpy(g_ui.peer_rec_from, from_id, UI_ID_LEN - 1);
-        strncpy(g_ui.peer_rec_name, from_name, UI_NAME_LEN - 1);
+        strlcpy(g_ui.peer_rec_from, from_id, UI_ID_LEN);
+        strlcpy(g_ui.peer_rec_name, from_name, UI_NAME_LEN);
         g_ui.peer_rec = true;
     } else {
         /* a stop only clears the indicator it started */

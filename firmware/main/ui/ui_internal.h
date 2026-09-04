@@ -19,8 +19,8 @@
 #define FONT_BODY     (&lv_font_montserrat_20)
 #define FONT_SMALL    (&lv_font_montserrat_16)
 
-#define SCREEN_W 368
-#define SCREEN_H 448
+/* SCREEN_W/SCREEN_H and all per-board layout numbers come from
+ * ui_geometry.h (via ui.h) */
 
 /* ---------- shared state ---------- */
 typedef struct {
@@ -145,6 +145,8 @@ void ui_offline_defer(void);         /* restart the quiet period      */
 lv_obj_t *mk_screen(void);                                  /* black bg     */
 lv_obj_t *mk_header(lv_obj_t *parent, const char *title,
                     bool back_btn, lv_event_cb_t on_back);
+/* the bar's title label (round: lives in the back cluster) */
+lv_obj_t *mk_header_title(lv_obj_t *bar);
 
 /* background image for themed screens (NULL when no theme active) */
 const lv_image_dsc_t *ui_bg_image(void);

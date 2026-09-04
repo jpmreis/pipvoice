@@ -1,10 +1,24 @@
+/* Per-board display bring-up lives behind PIP_BOARD_* (set by CMake from
+ * -DPIP_BOARD=<key>):
+ *   amoled-1.8    BSP 2.x + esp_lvgl_port, wired manually (the BSP's own
+ *                 bsp_display_start signalled flush-ready before the QSPI
+ *                 DMA finished and scrambled the panel)
+ *   amoled-1.75b  BSP 3.x + esp_lvgl_adapter: bsp_display_start() handles
+ *   amoled-2.16   flush timing, the 2 px QSPI rounder and touch itself
+ * Everything else (AXP2101 PMU, buttons, battery, brightness, LVGL lock)
+ * is identical silicon on all three and stays shared. */
 #include "board.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/touch.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
+#if defined(PIP_BOARD_AMOLED_1_75B) || defined(PIP_BOARD_AMOLED_2_16)
+#define PIP_BSP_LVGL_ADAPTER 1
+#else
+#define PIP_BSP_LVGL_ADAPTER 0
 #include "esp_lvgl_port.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -37,7 +51,9 @@ static const char *TAG = "board";
 static i2c_master_dev_handle_t s_pmu;
 static bool s_touch_ok;
 
-/* CO5300/SH8601 over QSPI requires 2-pixel-aligned flush windows */
+#if !PIP_BSP_LVGL_ADAPTER
+/* CO5300/SH8601 over QSPI requires 2-pixel-aligned flush windows
+ * (the 3.x BSPs register the equivalent rounder themselves) */
 static void rounder_cb(lv_area_t *area)
 {
     area->x1 &= ~1;
@@ -45,6 +61,7 @@ static void rounder_cb(lv_area_t *area)
     area->x2 |= 1;
     area->y2 |= 1;
 }
+#endif
 
 static uint8_t pmu_read(uint8_t reg, uint8_t dflt)
 {
@@ -85,7 +102,28 @@ static void pmu_init(void)
     pmu_update(AXP2101_REG_INTEN2, PKEY_BITS, PKEY_BITS);
 }
 
-void board_init(void)
+#if PIP_BSP_LVGL_ADAPTER
+/* 1.75-B / 2.16 (BSP 3.x): the BSP's own start path is sound - the
+ * esp_lvgl_adapter waits for the panel IO color-done callback before
+ * releasing draw buffers, registers the 2 px rounder, and brings up
+ * touch (CST9217/CST9220) and the brightness LEDC itself. Draw buffers
+ * live in PSRAM per the BSP profile, which spares the internal RAM the
+ * audio task and WiFi need.
+ *
+ * UNTESTED ON HARDWARE: first bring-up should watch the boot heap
+ * ledger and the panel for tearing before anything else. */
+static void display_init(void)
+{
+    if (!bsp_display_start()) {
+        ESP_LOGE(TAG, "display start failed");
+        abort();
+    }
+    /* touch registers inside bsp_display_start (it fails hard without) */
+    s_touch_ok = true;
+}
+#else
+/* 1.8 (BSP 2.x + esp_lvgl_port), wired manually - see display notes */
+static void display_init(void)
 {
     /* Panel reset (EXIO0), panel power (EXIO1) and touch reset (EXIO2)
      * hang off the TCA9554 expander. The BSP never drives them and the
@@ -164,6 +202,12 @@ void board_init(void)
     } else {
         ESP_LOGW(TAG, "touch init failed; UI will be view-only");
     }
+}
+#endif /* PIP_BSP_LVGL_ADAPTER */
+
+void board_init(void)
+{
+    display_init();
 
     board_set_brightness(200);
 
@@ -194,7 +238,14 @@ void board_init(void)
 bool board_touch_ok(void) { return s_touch_ok; }
 bool board_pmu_ok(void)   { return s_pmu != NULL; }
 
-bool board_lock(uint32_t timeout_ms) { return bsp_display_lock(timeout_ms); }
+bool board_lock(uint32_t timeout_ms)
+{
+#if PIP_BSP_LVGL_ADAPTER
+    return bsp_display_lock(timeout_ms) == ESP_OK;   /* 3.x: esp_err_t */
+#else
+    return bsp_display_lock(timeout_ms);             /* 2.x: bool */
+#endif
+}
 void board_unlock(void)              { bsp_display_unlock(); }
 
 void board_set_brightness(uint8_t v)

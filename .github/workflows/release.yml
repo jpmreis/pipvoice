@@ -1,12 +1,16 @@
-# Tagged release: build the firmware from the clean tag, package the
-# flash bundle + manifest, publish a GitHub Release. Servers ingest the
-# release from the admin Firmware page (server/app/release.py) and then
-# serve the binaries same-origin to their own web flasher and OTA — the
-# manifest is never fetched by browsers, so GitHub's missing CORS
-# headers on release assets don't matter.
+# Tagged release: build the firmware for every board from the clean tag,
+# package the flash bundles + one manifest, publish a GitHub Release.
+# Servers ingest the release from the admin Firmware page
+# (server/app/release.py) and then serve the binaries same-origin to
+# their own web flasher and OTA — the manifest is never fetched by
+# browsers, so GitHub's missing CORS headers on release assets don't
+# matter.
 #
 # Tag v<version> must match PROJECT_VER in firmware/CMakeLists.txt
-# (one version number for firmware + server + PWA).
+# (one version number for firmware + server + PWA; one tag ships one
+# build per board). Boards build on different IDF majors on purpose:
+# the 1.8 stays on 5.4.x (ES8311 mic-silence regression on 5.5), the
+# 1.75b/2.16 BSPs only exist for >=5.5.
 name: release
 on:
   push:
@@ -17,15 +21,12 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
-    # one supported board today; a second board becomes a matrix here
-    # plus a builds[] entry in firmware/tools/make_manifest.py
+    outputs:
+      ver: ${{ steps.ver.outputs.ver }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
       - name: Resolve version (tag must match PROJECT_VER)
         id: ver
         run: |
@@ -41,17 +42,59 @@ jobs:
           fi
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
 
-      - name: Build firmware (ESP-IDF v5.4.4)
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - board: amoled-1.8
+            idf: v5.4.4
+          - board: amoled-1.75b
+            idf: v5.5.5
+          - board: amoled-2.16
+            idf: v5.5.5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build firmware (${{ matrix.board }}, ESP-IDF ${{ matrix.idf }})
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.4.4
+          esp_idf_version: ${{ matrix.idf }}
           target: esp32s3
           path: firmware
+          command: idf.py -DPIP_BOARD=${{ matrix.board }} build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.board }}
+          path: |
+            firmware/build/pip.bin
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: builds
 
       - name: Package assets + manifest + notes
         run: |
           python3 firmware/tools/make_manifest.py \
-            --version "${{ steps.ver.outputs.ver }}" --build firmware/build \
+            --version "${{ needs.version.outputs.ver }}" \
+            --build amoled-1.8=builds/build-amoled-1.8 \
+            --build amoled-1.75b=builds/build-amoled-1.75b \
+            --build amoled-2.16=builds/build-amoled-2.16 \
             --changelog CHANGELOG.md --out dist
 
       - name: Publish GitHub Release
@@ -67,5 +110,5 @@ jobs:
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: pip-${{ steps.ver.outputs.ver }}-dryrun
+          name: pip-${{ needs.version.outputs.ver }}-dryrun
           path: dist/

@@ -163,16 +163,23 @@ lv_obj_t *scr_record_create(void)
     lv_obj_add_event_cb(s_scr, gesture_cb, LV_EVENT_GESTURE, NULL);
     s_header = mk_header(s_scr, "", true, back_clicked);
 
+#if GEO_ROUND
+    /* "To <name>" rides the header's centred cluster (there is no corner
+     * back arrow for it to clear) */
+    s_title = mk_header_title(s_header);
+#else
     s_title = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_title, FONT_TITLE, 0);
-    lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, GEO_REC_TITLE_Y);
+#endif
 
     s_timer_lbl = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_timer_lbl, FONT_BIG, 0);
-    lv_obj_align(s_timer_lbl, LV_ALIGN_TOP_MID, 0, 108);
+    lv_obj_align(s_timer_lbl, LV_ALIGN_TOP_MID, 0, GEO_REC_TIMER_Y);
 
-    s_rec_btn = mk_round_button(s_scr, 170, COL_ACCENT, rec_clicked, NULL);
-    lv_obj_align(s_rec_btn, LV_ALIGN_CENTER, 0, 20);
+    s_rec_btn = mk_round_button(s_scr, GEO_REC_BTN_D, COL_ACCENT,
+                                rec_clicked, NULL);
+    lv_obj_align(s_rec_btn, LV_ALIGN_CENTER, 0, GEO_REC_BTN_DY);
     s_rec_icon = lv_label_create(s_rec_btn);
     lv_obj_set_style_text_font(s_rec_icon, FONT_BIG, 0);
     lv_obj_set_style_text_color(s_rec_icon, COL_BG, 0);
@@ -181,30 +188,33 @@ lv_obj_t *scr_record_create(void)
     s_hint = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_hint, FONT_BODY, 0);
     lv_obj_set_style_text_color(s_hint, COL_TEXT_DIM, 0);
-    lv_obj_align(s_hint, LV_ALIGN_CENTER, 0, 130);
+    lv_obj_align(s_hint, LV_ALIGN_CENTER, 0, GEO_REC_HINT_DY);
 
     s_peer_lbl = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_peer_lbl, FONT_SMALL, 0);
     lv_obj_set_style_text_color(s_peer_lbl, COL_DANGER, 0);
-    lv_obj_align(s_peer_lbl, LV_ALIGN_CENTER, 0, 168);
+    lv_obj_align(s_peer_lbl, LV_ALIGN_CENTER, 0, GEO_REC_PEER_DY);
     lv_obj_add_flag(s_peer_lbl, LV_OBJ_FLAG_HIDDEN);
 
     s_peer_ttl = lv_timer_create(peer_ttl_cb, 20000, NULL);
     lv_timer_pause(s_peer_ttl);
 
-    /* one row: 12 | send 248 | 12 | redo 84 | 12 = 368; pill radius so
-     * the outer corners follow the panel's round corner */
+    /* one row, margins solved per panel (1.8: 12|248|12|84|12 = 368;
+     * round: the pair narrows to the bottom chord and centres); pill
+     * radius so the outer corners follow the panel's round corner */
     s_send_btn = mk_button(s_scr, LV_SYMBOL_UPLOAD "  Send", COL_OK,
                            send_clicked, NULL);
-    lv_obj_set_width(s_send_btn, 248);
-    lv_obj_set_style_radius(s_send_btn, 32, 0);
-    lv_obj_align(s_send_btn, LV_ALIGN_BOTTOM_LEFT, 12, -12);
+    lv_obj_set_size(s_send_btn, GEO_SEND_W, GEO_SEND_H);
+    lv_obj_set_style_radius(s_send_btn, GEO_SEND_H / 2, 0);
+    lv_obj_align(s_send_btn, LV_ALIGN_BOTTOM_LEFT,
+                 GEO_BTNROW_X, -GEO_BTNROW_BOTTOM);
 
     s_redo_btn = mk_button(s_scr, LV_SYMBOL_REFRESH, COL_SURFACE2,
                            redo_clicked, NULL);
-    lv_obj_set_size(s_redo_btn, 84, 64);
-    lv_obj_set_style_radius(s_redo_btn, 32, 0);
-    lv_obj_align(s_redo_btn, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+    lv_obj_set_size(s_redo_btn, GEO_REDO_W, GEO_SEND_H);
+    lv_obj_set_style_radius(s_redo_btn, GEO_SEND_H / 2, 0);
+    lv_obj_align(s_redo_btn, LV_ALIGN_BOTTOM_RIGHT,
+                 -GEO_BTNROW_X, -GEO_BTNROW_BOTTOM);
 
     apply_state(REC_IDLE);
     return s_scr;

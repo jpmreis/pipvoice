@@ -1,0 +1,4 @@
+# amoled-1.75b deltas on top of sdkconfig.defaults (see the SDKCONFIG_DEFAULTS
+# list in CMakeLists.txt). The round splash grows the wordmark to 48 px
+# (FONT_SPLASH in ui_geometry.h).
+CONFIG_LV_FONT_MONTSERRAT_48=y

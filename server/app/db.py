@@ -73,12 +73,13 @@ CREATE TABLE IF NOT EXISTS messages (
     delivered INTEGER NOT NULL DEFAULT 0,
     delivered_at TEXT
 );
-CREATE TABLE IF NOT EXISTS firmware (
-    version TEXT PRIMARY KEY,
-    notes TEXT DEFAULT '',
-    active INTEGER NOT NULL DEFAULT 0,
+CREATE TABLE IF NOT EXISTS firmware (   -- one row per (version, board):
+    version TEXT NOT NULL,               -- one PROJECT_VER tag ships one
+    notes TEXT DEFAULT '',               -- build per hardware model
+    active INTEGER NOT NULL DEFAULT 0,   -- active is per board
     created TEXT NOT NULL DEFAULT (datetime('now')),
-    board TEXT NOT NULL DEFAULT 'amoled-1.8'  -- hardware model (boards.py)
+    board TEXT NOT NULL DEFAULT 'amoled-1.8',  -- hardware model (boards.py)
+    PRIMARY KEY (version, board)
 );
 CREATE TABLE IF NOT EXISTS reactions ( -- one per message, latest wins;
     msg_id TEXT PRIMARY KEY,           -- no FK to messages: a reaction must
@@ -131,6 +132,28 @@ def init():
                 c.execute(m)
             except sqlite3.OperationalError:
                 pass                     # column already exists
+        # one-off table rebuild (SQLite can't ALTER a primary key): the
+        # firmware PK grew from (version) to (version, board) for
+        # multi-SKU releases. Detected by the stored CREATE statement;
+        # idempotent - rebuilt tables carry the composite PK verbatim.
+        fw_sql = one(c, """SELECT sql FROM sqlite_master
+                           WHERE type='table' AND name='firmware'""")
+        if fw_sql and "PRIMARY KEY (version, board)" not in fw_sql["sql"]:
+            c.executescript("""
+                ALTER TABLE firmware RENAME TO firmware_old;
+                CREATE TABLE firmware (
+                    version TEXT NOT NULL,
+                    notes TEXT DEFAULT '',
+                    active INTEGER NOT NULL DEFAULT 0,
+                    created TEXT NOT NULL DEFAULT (datetime('now')),
+                    board TEXT NOT NULL DEFAULT 'amoled-1.8',
+                    PRIMARY KEY (version, board)
+                );
+                INSERT INTO firmware (version, notes, active, created, board)
+                    SELECT version, notes, active, created, board
+                    FROM firmware_old;
+                DROP TABLE firmware_old;
+            """)
         # without local auth, login is email code only: blank any stored
         # hash so old secrets don't linger in the file. Self-hosters keep
         # theirs (PIP_LOCAL_AUTH=1, see auth.py).
@@ -229,5 +252,9 @@ def audio_usage() -> tuple[int, int]:
     return n, size
 
 
-def firmware_path(version: str) -> str:
-    return os.path.join(FIRMWARE_DIR, f"{version}.bin")
+def firmware_path(version: str, board: str = "amoled-1.8") -> str:
+    """The default board keeps the bare legacy filename: old OTA URLs and
+    already-stored files stay valid."""
+    if board == "amoled-1.8":
+        return os.path.join(FIRMWARE_DIR, f"{version}.bin")
+    return os.path.join(FIRMWARE_DIR, f"{version}.{board}.bin")

@@ -364,8 +364,8 @@ def firmware_page(request: Request, ident: Identity = AdminDep,
                   msg: str = None):
     with db.conn() as c:
         rows = db.all_(c, "SELECT * FROM firmware ORDER BY created DESC")
-    bundles = {r["version"]: all(
-        os.path.exists(provision.asset_path(r["version"], k))
+    bundles = {f"{r['version']}|{r['board']}": all(
+        os.path.exists(provision.asset_path(r["version"], k, r["board"]))
         for k in provision.ASSET_KINDS) for r in rows}
     return _page(request, "firmware.html", firmwares=rows, bundles=bundles,
                  msg=msg, release_url=release.MANIFEST_URL, me=ident)
@@ -395,14 +395,14 @@ async def firmware_upload(ident: Identity = AdminDep,
     if not boards.valid(board):
         raise HTTPException(400, "unknown board model")
     data = await file.read()
-    with open(db.firmware_path(version), "wb") as f:
+    with open(db.firmware_path(version, board), "wb") as f:
         f.write(data)
     # optional web-flash bundle parts (build/bootloader/bootloader.bin,
     # build/partition_table/partition-table.bin)
     for kind, up in (("bootloader", bootloader), ("parttable", parttable)):
         if up and up.filename:
             blob = await up.read()
-            with open(provision.asset_path(version, kind), "wb") as f:
+            with open(provision.asset_path(version, kind, board), "wb") as f:
                 f.write(blob)
     with db.conn() as c:
         if activate:
@@ -417,17 +417,17 @@ async def firmware_upload(ident: Identity = AdminDep,
     return RedirectResponse("/admin/firmware", status_code=303)
 
 
-@router.post("/firmware/{version}/activate")
-def firmware_activate(version: str, ident: Identity = AdminDep):
+@router.post("/firmware/{board}/{version}/activate")
+def firmware_activate(board: str, version: str, ident: Identity = AdminDep):
     with db.conn() as c:
-        fw = db.one(c, "SELECT board FROM firmware WHERE version=?",
-                    (version,))
+        fw = db.one(c, """SELECT board FROM firmware
+                          WHERE version=? AND board=?""", (version, board))
         if not fw:
             raise HTTPException(404, "no such firmware")
         # active is per board: activating a build only rolls out its model
-        c.execute("UPDATE firmware SET active=0 WHERE board=?",
-                  (fw["board"],))
-        c.execute("UPDATE firmware SET active=1 WHERE version=?", (version,))
+        c.execute("UPDATE firmware SET active=0 WHERE board=?", (board,))
+        c.execute("""UPDATE firmware SET active=1
+                     WHERE version=? AND board=?""", (version, board))
     api.version_bumped()
     mqtt.notify_all('{"event":"firmware","version":"%s"}' % version)
     return RedirectResponse("/admin/firmware", status_code=303)

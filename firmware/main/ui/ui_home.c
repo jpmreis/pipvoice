@@ -64,8 +64,8 @@ static uint8_t rssi_waves(int8_t rssi, uint8_t cur)
 static void contact_clicked(lv_event_t *e)
 {
     const ui_contact_t *c = lv_event_get_user_data(e);
-    strncpy(g_ui.selected_contact_id, c->id, UI_ID_LEN - 1);
-    strncpy(g_ui.selected_contact_name, c->name, UI_NAME_LEN - 1);
+    strlcpy(g_ui.selected_contact_id, c->id, UI_ID_LEN);
+    strlcpy(g_ui.selected_contact_name, c->name, UI_NAME_LEN);
     ui_react_mark_seen(g_ui.selected_contact_id);  /* badge = seen on open */
     scr_record_show();
     nav_to(SCR_RECORD, LV_SCR_LOAD_ANIM_MOVE_LEFT);
@@ -98,19 +98,58 @@ lv_obj_t *scr_home_create(void)
     s_scr = mk_screen();
     lv_obj_add_event_cb(s_scr, gesture_cb, LV_EVENT_GESTURE, NULL);
 
-    /* status bar: settings gear left, wifi/battery right */
+    /* status bar: gear/wifi in the corners on rect panels; a circle has
+     * no corners, so the round build gathers everything into one centred
+     * cluster (gear · clock · wifi · battery) below the rim */
     lv_obj_t *bar = lv_obj_create(s_scr);
     lv_obj_remove_style_all(bar);
-    lv_obj_set_size(bar, SCREEN_W, 56);
+    lv_obj_set_size(bar, SCREEN_W, GEO_HDR_H);
     lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);   /* overflowing gear
                                                          must not scroll */
 
+#if GEO_ROUND
+    lv_obj_t *cl = lv_obj_create(bar);
+    lv_obj_remove_style_all(cl);
+    lv_obj_set_size(cl, LV_SIZE_CONTENT, 36);
+    lv_obj_align(cl, LV_ALIGN_TOP_MID, 0, GEO_STATUS_Y);
+    lv_obj_set_flex_flow(cl, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(cl, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(cl, 10, 0);
+    lv_obj_clear_flag(cl, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *gear = lv_button_create(cl);
+    lv_obj_remove_style_all(gear);
+    lv_obj_set_size(gear, 44, 36);
+    lv_obj_add_flag(gear, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(gear, 14);
+    lv_obj_add_event_cb(gear, settings_clicked, LV_EVENT_CLICKED, NULL);
+    s_gear_lbl = lv_label_create(gear);
+    lv_label_set_text(s_gear_lbl, LV_SYMBOL_SETTINGS);
+    lv_obj_set_style_text_color(s_gear_lbl, COL_TEXT_DIM, 0);
+    lv_obj_set_style_text_font(s_gear_lbl, FONT_TITLE, 0);
+    lv_obj_center(s_gear_lbl);
+
+    s_clock_lbl = lv_label_create(cl);
+    lv_obj_set_style_text_font(s_clock_lbl, FONT_BODY, 0);
+    lv_obj_set_style_text_color(s_clock_lbl, COL_TEXT_DIM, 0);
+    lv_label_set_text(s_clock_lbl, "");
+
+    lv_obj_t *wifi_box = lv_obj_create(cl);
+    lv_obj_remove_style_all(wifi_box);
+    lv_obj_set_size(wifi_box, WAVE_BOX_W, 36);
+    lv_obj_clear_flag(wifi_box, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_status_lbl = lv_label_create(cl);
+    lv_obj_set_style_text_font(s_status_lbl, FONT_SMALL, 0);
+    lv_obj_set_style_text_color(s_status_lbl, COL_TEXT_DIM, 0);
+#else
     /* nudged down and enlarged: the rounded panel corner makes targets
      * flush with the corner hard to hit */
     lv_obj_t *gear = lv_button_create(bar);
     lv_obj_remove_style_all(gear);
-    lv_obj_set_size(gear, 72, 56);
+    lv_obj_set_size(gear, 72, GEO_HDR_H);
     lv_obj_align(gear, LV_ALIGN_LEFT_MID, 0, 6);
     lv_obj_add_flag(gear, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(gear, settings_clicked, LV_EVENT_CLICKED, NULL);
@@ -123,9 +162,24 @@ lv_obj_t *scr_home_create(void)
     /* wifi mirrors the gear: same box, same font, same downward nudge */
     lv_obj_t *wifi_box = lv_obj_create(bar);
     lv_obj_remove_style_all(wifi_box);
-    lv_obj_set_size(wifi_box, 72, 56);
+    lv_obj_set_size(wifi_box, 72, GEO_HDR_H);
     lv_obj_align(wifi_box, LV_ALIGN_RIGHT_MID, 0, 6);
     lv_obj_clear_flag(wifi_box, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_status_lbl = lv_label_create(bar);
+    lv_obj_set_style_text_font(s_status_lbl, FONT_SMALL, 0);
+    lv_obj_set_style_text_color(s_status_lbl, COL_TEXT_DIM, 0);
+    lv_obj_align(s_status_lbl, LV_ALIGN_RIGHT_MID, -72, 6);
+
+    /* clock in the bar's dead center, same downward nudge as its
+     * neighbours; empty (invisible) until the box knows the time */
+    s_clock_lbl = lv_label_create(bar);
+    lv_obj_set_style_text_font(s_clock_lbl, FONT_BODY, 0);
+    lv_obj_set_style_text_color(s_clock_lbl, COL_TEXT_DIM, 0);
+    lv_label_set_text(s_clock_lbl, "");
+    lv_obj_align(s_clock_lbl, LV_ALIGN_CENTER, 0, 6);
+#endif
+
     s_wifi_lbl = lv_label_create(wifi_box);
     lv_obj_set_style_text_font(s_wifi_lbl, FONT_TITLE, 0);
     lv_obj_set_style_text_color(s_wifi_lbl, COL_TEXT_DIM, 0);
@@ -147,56 +201,47 @@ lv_obj_t *scr_home_create(void)
     lv_obj_set_style_radius(s_wave_dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(s_wave_dot, LV_OPA_COVER, 0);
 
-    s_status_lbl = lv_label_create(bar);
-    lv_obj_set_style_text_font(s_status_lbl, FONT_SMALL, 0);
-    lv_obj_set_style_text_color(s_status_lbl, COL_TEXT_DIM, 0);
-    lv_obj_align(s_status_lbl, LV_ALIGN_RIGHT_MID, -72, 6);
-
-    /* clock in the bar's dead center, same downward nudge as its
-     * neighbours; empty (invisible) until the box knows the time */
-    s_clock_lbl = lv_label_create(bar);
-    lv_obj_set_style_text_font(s_clock_lbl, FONT_BODY, 0);
-    lv_obj_set_style_text_color(s_clock_lbl, COL_TEXT_DIM, 0);
-    lv_label_set_text(s_clock_lbl, "");
-    lv_obj_align(s_clock_lbl, LV_ALIGN_CENTER, 0, 6);
-
     /* greeting + contact grid: the "Hello <owner>" heading is the grid's
      * first (full-width) row, so it scrolls away with the contacts. The
      * grid spans the full top of the screen with the bar floating
      * transparently above it (pad_top keeps content below the bar at
      * rest), so scrolling content slides under the bar instead of being
      * cropped at its edge. */
-    /* vertical budget: with 4 contacts the second row of NAMES must be
-     * fully visible at scroll 0, i.e. clear the grid clip line which sits
-     * flush with the inbox pill (448 - 68 - 8 = 372):
-     *   48 pad_top + 30 hello + 14 gap + 132 row1 + 14 gap
-     *     + 108 name-y + 22 name = 368 <= 372.
+    /* vertical budget: with 4 contacts (2.16: seen tiles) the second row
+     * of NAMES must be fully visible at scroll 0, i.e. clear the grid
+     * clip line which sits flush with the inbox pill (GEO_GRID_H):
+     *   1.8:    48 + 30 hello + 14 + 132 row1 + 14 + 108 name-y + 22
+     *             = 368 <= 372
+     *   1.75b:  74 + 30 hello +  8 + 126 row1 +  8 + 100 name-y + 22
+     *             = 368 <= 378
+     *   2.16:   72 (no hello) + 158 row1 + 12 + 136 name-y + 22
+     *             = 400 <= 404
      * Touch any of these numbers together or row 2 crops again. */
     s_grid = lv_obj_create(s_scr);
     lv_obj_remove_style_all(s_grid);
-    lv_obj_set_size(s_grid, SCREEN_W, SCREEN_H - 76);
+    lv_obj_set_size(s_grid, SCREEN_W, GEO_GRID_H);
     lv_obj_align(s_grid, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_pad_top(s_grid, 48, 0);
+    lv_obj_set_style_pad_top(s_grid, GEO_HOME_PAD_TOP, 0);
     lv_obj_set_flex_flow(s_grid, LV_FLEX_FLOW_ROW_WRAP);
     /* track placement must be START: CENTER re-centers overflowing
      * content on every scroll relayout, so with 5+ contacts the grid
      * rested fully scrolled down and sprang back when scrolled up */
     lv_obj_set_flex_align(s_grid, LV_FLEX_ALIGN_SPACE_EVENLY,
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(s_grid, 14, 0);
+    lv_obj_set_style_pad_row(s_grid, GEO_GRID_PAD_ROW, 0);
     lv_obj_set_scroll_dir(s_grid, LV_DIR_VER);
 
-    /* inbox button pinned at bottom */
+    /* inbox button pinned at bottom (round: narrowed to the chord) */
     s_inbox_btn = mk_button(s_scr, "", COL_SURFACE, inbox_clicked, NULL);
-    lv_obj_set_size(s_inbox_btn, SCREEN_W - 24, 68);
-    lv_obj_set_style_radius(s_inbox_btn, 34, 0);   /* pill: clears the
-                                                      panel's round corner */
-    lv_obj_align(s_inbox_btn, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_set_size(s_inbox_btn, GEO_PILL_W, GEO_PILL_H);
+    lv_obj_set_style_radius(s_inbox_btn, GEO_PILL_H / 2, 0);  /* pill:
+                                          clears the panel's round corner */
+    lv_obj_align(s_inbox_btn, LV_ALIGN_BOTTOM_MID, 0, -GEO_PILL_BOTTOM);
     s_inbox_lbl = lv_obj_get_child(s_inbox_btn, 0);
 
     s_badge = lv_obj_create(s_inbox_btn);
     lv_obj_remove_style_all(s_badge);
-    lv_obj_set_size(s_badge, 34, 34);
+    lv_obj_set_size(s_badge, GEO_BADGE_D, GEO_BADGE_D);
     lv_obj_set_style_radius(s_badge, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(s_badge, COL_DANGER, 0);
     lv_obj_set_style_bg_opa(s_badge, LV_OPA_COVER, 0);
@@ -218,7 +263,9 @@ static void rebuild_contacts(void)
 {
     lv_obj_clean(s_grid);
 
-    if (g_ui.owner_name[0]) {
+    /* the 2.16 drops the greeting: big tiles read across a room and the
+     * heading cost them a full row of vertical budget */
+    if (GEO_HOME_GREETING && g_ui.owner_name[0]) {
         lv_obj_t *hello = lv_label_create(s_grid);
         lv_label_set_text_fmt(hello, "Hello %s", g_ui.owner_name);
         lv_obj_set_style_text_font(hello, FONT_TITLE, 0);
@@ -232,9 +279,10 @@ static void rebuild_contacts(void)
 
         lv_obj_t *cell = lv_obj_create(s_grid);
         lv_obj_remove_style_all(cell);
-        lv_obj_set_size(cell, (SCREEN_W / 2) - 16, 132);
+        lv_obj_set_size(cell, GEO_CELL_W, GEO_CELL_H);
 
-        lv_obj_t *av = mk_round_button(cell, 104, lv_color_hex(c->color),
+        lv_obj_t *av = mk_round_button(cell, GEO_AVATAR_D,
+                                       lv_color_hex(c->color),
                                        contact_clicked, c);
         lv_obj_align(av, LV_ALIGN_TOP_MID, 0, 0);
         lv_obj_t *init = lv_label_create(av);
@@ -250,14 +298,15 @@ static void rebuild_contacts(void)
             lv_obj_t *chip = lv_obj_create(av);
             lv_obj_remove_style_all(chip);
             const char *txt = ui_reaction_text(rb->key);
-            lv_obj_set_size(chip, txt ? LV_SIZE_CONTENT : 40, 40);
-            lv_obj_set_style_radius(chip, 20, 0);
+            lv_obj_set_size(chip, txt ? LV_SIZE_CONTENT : GEO_CHIP_D,
+                            GEO_CHIP_D);
+            lv_obj_set_style_radius(chip, GEO_CHIP_D / 2, 0);
             lv_obj_set_style_bg_color(chip, COL_SURFACE2, 0);
             lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
             lv_obj_set_style_border_width(chip, 2, 0);
             lv_obj_set_style_border_color(chip, COL_ACCENT, 0);
             lv_obj_set_style_pad_hor(chip, txt ? 10 : 0, 0);
-            lv_obj_align(chip, LV_ALIGN_TOP_RIGHT, 8, -4);
+            lv_obj_align(chip, LV_ALIGN_TOP_RIGHT, GEO_CHIP_DX, GEO_CHIP_DY);
             if (txt) {
                 lv_obj_t *l = lv_label_create(chip);
                 lv_label_set_text(l, txt);
@@ -267,8 +316,9 @@ static void rebuild_contacts(void)
             } else {
                 lv_obj_t *e = lv_image_create(chip);
                 lv_image_set_src(e, ui_emoji_img(rb->key));
-                lv_image_set_scale(e, 112);        /* 64 px -> 28 px */
-                lv_obj_set_size(e, 28, 28);
+                /* baked emoji are 64 px; scale is 256ths */
+                lv_image_set_scale(e, GEO_CHIP_EMOJI_PX * 4);
+                lv_obj_set_size(e, GEO_CHIP_EMOJI_PX, GEO_CHIP_EMOJI_PX);
                 lv_image_set_inner_align(e, LV_IMAGE_ALIGN_CENTER);
                 lv_obj_center(e);
             }
@@ -280,7 +330,7 @@ static void rebuild_contacts(void)
         ui_fg_label(nm, false);
         /* just under the avatar it belongs to - the row gap (pad_row)
          * provides the larger break before the next row */
-        lv_obj_align(nm, LV_ALIGN_TOP_MID, 0, 108);
+        lv_obj_align(nm, LV_ALIGN_TOP_MID, 0, GEO_NAME_Y);
     }
 }
 

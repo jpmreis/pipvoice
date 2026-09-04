@@ -27,3 +27,23 @@ idf_component_register(
 # lv_mem_psram.c defines LVGL's custom-malloc hooks; nothing in this
 # component references them, so force the linker to pull the object in
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_malloc_core")
+
+# --- board selection (PIP_BOARD set in the project CMakeLists) ---
+# The define picks the ui_geometry.h block; PIP_BOARD_NAME is the server
+# boards.py key printed in the PIP-HW line and sent on theme downloads.
+if(PIP_BOARD STREQUAL "amoled-1.8")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PIP_BOARD_AMOLED_1_8)
+elseif(PIP_BOARD STREQUAL "amoled-1.75b")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PIP_BOARD_AMOLED_1_75B)
+    message(STATUS "pip: amoled-1.75b build (BSP 3.x path; NOT yet "
+                   "bench-tested on hardware)")
+elseif(PIP_BOARD STREQUAL "amoled-2.16")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PIP_BOARD_AMOLED_2_16)
+    message(STATUS "pip: amoled-2.16 build (BSP 3.x path; NOT yet "
+                   "bench-tested on hardware)")
+else()
+    message(FATAL_ERROR "unknown PIP_BOARD '${PIP_BOARD}' "
+                        "(amoled-1.8 | amoled-1.75b | amoled-2.16)")
+endif()
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+                           PIP_BOARD_NAME="${PIP_BOARD}")

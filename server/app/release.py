@@ -47,56 +47,29 @@ def _get(url: str, cap: int):
         return data, r.geturl()
 
 
-def _dest_path(version: str, kind: str) -> str:
+def _dest_path(version: str, kind: str, board: str) -> str:
     if kind == "app":
-        return db.firmware_path(version)
-    return provision.asset_path(version, kind)   # bootloader / parttable
+        return db.firmware_path(version, board)
+    return provision.asset_path(version, kind, board)  # bootloader/parttable
 
 
-def install() -> str:
-    """Fetch the manifest and install its version. Returns a human
-    message; raises on network/validation failure."""
-    raw, _ = _get(MANIFEST_URL, MAX_MANIFEST)
-    m = json.loads(raw)
-    version = str(m.get("version", ""))
-    if not re.fullmatch(_VERSION_RE, version):
-        raise ValueError(f"manifest has a bad version: {version!r}")
-
-    # Builds are per board (boards.py). Until firmware storage is
-    # board-scoped ({version}.bin collides across boards), only the
-    # default board's build is ingested; other known boards are logged
-    # and skipped, an unknown board name is a hard error (a silent
-    # first-match here once meant a wrong-model flash was possible).
-    build = None
-    for b in m.get("builds", []):
-        if b.get("chipFamily") != CHIP_FAMILY:
-            continue
-        key = boards.by_manifest_name(b.get("board", ""))
-        if key is None:
-            raise ValueError(f"manifest names an unknown board: "
-                             f"{b.get('board')!r}")
-        if key != boards.DEFAULT_BOARD:
-            log.info("release %s: skipping %s build (multi-board storage "
-                     "not implemented yet)", version, key)
-            continue
-        build = b
-    if not build:
-        raise ValueError(f"manifest has no {CHIP_FAMILY} build for the "
-                         f"{boards.DEFAULT_BOARD} board")
+def _install_build(version: str, board: str, build: dict) -> bool:
+    """Download + verify one board's parts; True when work was done."""
     parts = build.get("parts", [])
     kinds = {p.get("kind") for p in parts}
     if not {"app", "bootloader", "parttable"} <= kinds:
-        raise ValueError(f"manifest bundle incomplete: {sorted(kinds)}")
+        raise ValueError(f"{board}: manifest bundle incomplete: "
+                         f"{sorted(kinds)}")
 
     with db.conn() as c:
-        have_row = db.one(c, "SELECT version FROM firmware WHERE version=?",
-                          (version,))
-    have_files = all(os.path.exists(_dest_path(version, k))
+        have_row = db.one(c, """SELECT version FROM firmware
+                                WHERE version=? AND board=?""",
+                          (version, board))
+    have_files = all(os.path.exists(_dest_path(version, k, board))
                      for k in ("app", "bootloader", "parttable"))
     if have_row and have_files:
-        return f"already installed: {version}"
+        return False
 
-    os.makedirs(db.FIRMWARE_DIR, exist_ok=True)
     for p in parts:
         kind = p.get("kind")
         if kind not in ("app", "bootloader", "parttable"):
@@ -112,15 +85,51 @@ def install() -> str:
         if got != p.get("sha256"):
             raise ValueError(f"{p['path']}: sha256 mismatch "
                              f"(manifest {p.get('sha256')}, got {got})")
-        dest = _dest_path(version, kind)
+        dest = _dest_path(version, kind, board)
         tmp = dest + ".part"
         with open(tmp, "wb") as f:
             f.write(data)
         os.replace(tmp, dest)            # atomic: OTA never sees a torn file
-        log.info("release %s: %s ok (%d bytes)", version, kind, len(data))
+        log.info("release %s/%s: %s ok (%d bytes)",
+                 version, board, kind, len(data))
 
     with db.conn() as c:                 # inactive; admin activates when ready
         c.execute("""INSERT OR IGNORE INTO firmware
                      (version, notes, active, board) VALUES (?,?,0,?)""",
-                  (version, "GitHub release", boards.DEFAULT_BOARD))
-    return f"installed {version} - activate it when ready"
+                  (version, "GitHub release", board))
+    return True
+
+
+def install() -> str:
+    """Fetch the manifest and install its version - every board build it
+    carries. Returns a human message; raises on network/validation
+    failure. An unknown board name is a hard error (a silent first-match
+    here once meant a wrong-model flash was possible); a pre-multi-SKU
+    manifest (no board field) is the 1.8's."""
+    raw, _ = _get(MANIFEST_URL, MAX_MANIFEST)
+    m = json.loads(raw)
+    version = str(m.get("version", ""))
+    if not re.fullmatch(_VERSION_RE, version):
+        raise ValueError(f"manifest has a bad version: {version!r}")
+
+    builds = {}                          # board key -> build entry
+    for b in m.get("builds", []):
+        if b.get("chipFamily") != CHIP_FAMILY:
+            continue
+        key = boards.by_manifest_name(b.get("board", ""))
+        if key is None:
+            raise ValueError(f"manifest names an unknown board: "
+                             f"{b.get('board')!r}")
+        if key in builds:
+            raise ValueError(f"manifest lists two builds for {key}")
+        builds[key] = b
+    if not builds:
+        raise ValueError(f"manifest has no {CHIP_FAMILY} builds")
+
+    os.makedirs(db.FIRMWARE_DIR, exist_ok=True)
+    installed = [k for k, b in sorted(builds.items())
+                 if _install_build(version, k, b)]
+    if not installed:
+        return f"already installed: {version} ({', '.join(sorted(builds))})"
+    return (f"installed {version} for {', '.join(installed)} - "
+            "activate per model when ready")

@@ -31,14 +31,17 @@ lv_obj_t *scr_wifi_setup_create(void)
                             "No page? Open 192.168.4.1");
     lv_obj_set_style_text_font(hint, FONT_SMALL, 0);
     lv_obj_set_style_text_color(hint, COL_TEXT_DIM, 0);
-    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 58);
+#if GEO_ROUND
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+#endif
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, GEO_WIFI_HINT_Y);
 
 #if LV_USE_QRCODE
     s_qr = lv_qrcode_create(s_scr);
     lv_qrcode_set_size(s_qr, 210);
     lv_qrcode_set_dark_color(s_qr, COL_BG);
     lv_qrcode_set_light_color(s_qr, COL_TEXT);
-    lv_obj_align(s_qr, LV_ALIGN_CENTER, 0, 24);
+    lv_obj_align(s_qr, LV_ALIGN_CENTER, 0, GEO_WIFI_QR_DY);
     /* white quiet zone so scanners lock on against the black screen */
     lv_obj_set_style_border_color(s_qr, COL_TEXT, 0);
     lv_obj_set_style_border_width(s_qr, 8, 0);
@@ -46,12 +49,12 @@ lv_obj_t *scr_wifi_setup_create(void)
 
     s_ssid_lbl = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_ssid_lbl, FONT_BODY, 0);
-    lv_obj_align(s_ssid_lbl, LV_ALIGN_BOTTOM_MID, 0, -46);
+    lv_obj_align(s_ssid_lbl, LV_ALIGN_BOTTOM_MID, 0, GEO_WIFI_SSID_DY);
 
     s_pass_lbl = lv_label_create(s_scr);
     lv_obj_set_style_text_font(s_pass_lbl, FONT_SMALL, 0);
     lv_obj_set_style_text_color(s_pass_lbl, COL_TEXT_DIM, 0);
-    lv_obj_align(s_pass_lbl, LV_ALIGN_BOTTOM_MID, 0, -18);
+    lv_obj_align(s_pass_lbl, LV_ALIGN_BOTTOM_MID, 0, GEO_WIFI_PASS_DY);
 
     return s_scr;
 }

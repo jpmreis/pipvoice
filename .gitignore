@@ -16,3 +16,6 @@ CLAUDE.local.md
 pip.bundle
 /.env
 docker-compose.override.yml
+firmware/main/idf_component.yml
+firmware/sdkconfig.amoled-*
+firmware/build-amoled-*/

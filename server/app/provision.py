@@ -223,20 +223,24 @@ def rekey_device(device_id: str, device_name: str, pin: str,
 ASSET_KINDS = ("bootloader", "parttable")
 
 
-def asset_path(version: str, kind: str) -> str:
-    return os.path.join(db.FIRMWARE_DIR, f"{version}.{kind}.bin")
+def asset_path(version: str, kind: str,
+               board: str = "amoled-1.8") -> str:
+    """Default board keeps the bare legacy names (pre-multi-SKU files)."""
+    if board == "amoled-1.8":
+        return os.path.join(db.FIRMWARE_DIR, f"{version}.{kind}.bin")
+    return os.path.join(db.FIRMWARE_DIR, f"{version}.{board}.{kind}.bin")
 
 
-def flash_assets_version():
-    """Version whose bootloader+partition-table files exist on disk:
-    the active firmware's if complete, else the newest complete set
-    (they change ~never; an app-only upload must not break flashing).
-    Returns None when no complete set exists."""
+def flash_assets_version(board: str = "amoled-1.8"):
+    """Version whose bootloader+partition-table files exist on disk for
+    this board: the active firmware's if complete, else the newest
+    complete set (they change ~never; an app-only upload must not break
+    flashing). Returns None when no complete set exists."""
     with db.conn() as c:
-        rows = db.all_(c, """SELECT version FROM firmware
-                             ORDER BY active DESC, created DESC""")
+        rows = db.all_(c, """SELECT version FROM firmware WHERE board=?
+                             ORDER BY active DESC, created DESC""", (board,))
     for r in rows:
-        if all(os.path.exists(asset_path(r["version"], k))
+        if all(os.path.exists(asset_path(r["version"], k, board))
                for k in ASSET_KINDS):
             return r["version"]
     return None

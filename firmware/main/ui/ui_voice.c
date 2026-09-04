@@ -48,12 +48,17 @@ lv_obj_t *scr_voice_create(void)
     lv_obj_set_style_text_color(s_hint, COL_TEXT_DIM, 0);
     lv_label_set_text(s_hint, "say \"yes\"");
 
-    /* an escape hatch for a helper standing nearby */
+    /* an escape hatch for a helper standing nearby; the round panel has
+     * no top-right corner, so the X moves to the bottom chord there */
     lv_obj_t *close = lv_label_create(scr);
     lv_obj_set_style_text_font(close, FONT_TITLE, 0);
     lv_obj_set_style_text_color(close, COL_TEXT_DIM, 0);
     lv_label_set_text(close, LV_SYMBOL_CLOSE);
+#if GEO_VOICE_CLOSE_BOTTOM
+    lv_obj_align(close, LV_ALIGN_BOTTOM_MID, 0, -36);
+#else
     lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -20, 16);
+#endif
     lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_ext_click_area(close, 24);
     lv_obj_add_event_cb(close, close_clicked, LV_EVENT_CLICKED, NULL);

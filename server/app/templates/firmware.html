@@ -6,10 +6,10 @@
 {% for f in firmwares %}<tr><td>{{ f.version }}</td>
 <td class="muted">{{ f.board }}</td><td>{{ f.notes }}</td>
 <td class="muted">{{ f.created[:16] }}</td>
-<td class="muted">{% if bundles[f.version] %}complete{% else %}app only{% endif %}</td>
+<td class="muted">{% if bundles[f.version ~ "|" ~ f.board] %}complete{% else %}app only{% endif %}</td>
 <td>{% if f.active %}<span class="ok">ACTIVE</span>{% endif %}</td>
 <td>{% if not f.active %}<form method="post"
-action="/admin/firmware/{{ f.version }}/activate">
+action="/admin/firmware/{{ f.board }}/{{ f.version }}/activate">
 <button>Activate</button></form>{% endif %}</td></tr>{% endfor %}
 </table>
 <p class="muted">Devices check daily and self-update to the active version.</p></div>
@@ -20,7 +20,8 @@ action="/admin/firmware/{{ f.version }}/activate">
 bootloader + partition table, sha256-verified) from<br>
 <code>{{ release_url }}</code><br>
 It installs inactive — activate it above to roll out the fleet.
+Each model activates separately (one active build per board).
 Development builds can still be pushed with a POST to
 <code>/admin/firmware</code> (fields: version, notes, file, bootloader,
-parttable, activate).</p></div>
+parttable, activate, board).</p></div>
 {% endblock %}

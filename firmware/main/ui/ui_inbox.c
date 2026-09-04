@@ -47,8 +47,8 @@ lv_obj_t *scr_inbox_create(void)
 
     s_list = lv_obj_create(s_scr);
     lv_obj_remove_style_all(s_list);
-    lv_obj_set_size(s_list, SCREEN_W - 16, SCREEN_H - 64);
-    lv_obj_align(s_list, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(s_list, GEO_LIST_W, GEO_LIST_H);
+    lv_obj_align(s_list, LV_ALIGN_TOP_MID, 0, GEO_LIST_TOP);
     lv_obj_set_flex_flow(s_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(s_list, 8, 0);
     lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
@@ -113,7 +113,7 @@ void scr_inbox_refresh(void)
         lv_obj_set_style_bg_opa(row, UI_SURFACE_OPA, 0);
         lv_obj_set_style_radius(row, 14, 0);
         lv_obj_set_style_shadow_width(row, 0, 0);
-        lv_obj_set_size(row, LV_PCT(100), 76);
+        lv_obj_set_size(row, LV_PCT(100), GEO_ROW_H);
         lv_obj_add_event_cb(row, row_clicked, LV_EVENT_CLICKED, m);
         lv_obj_add_event_cb(row, row_long_pressed, LV_EVENT_LONG_PRESSED, m);
         if (!m->heard) {   /* unheard: amber stroke, matches the meta line */
@@ -125,11 +125,11 @@ void scr_inbox_refresh(void)
          * mistaken for someone whose avatar color is red */
         lv_obj_t *av = lv_obj_create(row);
         lv_obj_remove_style_all(av);
-        lv_obj_set_size(av, 44, 44);
+        lv_obj_set_size(av, GEO_ROW_AV, GEO_ROW_AV);
         lv_obj_set_style_radius(av, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_opa(av, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(av, lv_color_hex(m->sender_color), 0);
-        lv_obj_align(av, LV_ALIGN_LEFT_MID, 2, 0);
+        lv_obj_align(av, LV_ALIGN_LEFT_MID, GEO_ROW_AV_X, 0);
         lv_obj_t *ini = lv_label_create(av);
         char letter[2] = { m->sender_name[0] ? m->sender_name[0] : '?', 0 };
         lv_label_set_text(ini, letter);
@@ -141,7 +141,7 @@ void scr_inbox_refresh(void)
         lv_label_set_text(who, m->sender_name);
         lv_obj_set_style_text_font(who, FONT_BODY, 0);
         lv_obj_set_style_text_color(who, COL_TEXT, 0);
-        lv_obj_align(who, LV_ALIGN_TOP_LEFT, 58, 4);
+        lv_obj_align(who, LV_ALIGN_TOP_LEFT, GEO_ROW_TEXT_X, 4);
 
         /* unheard: amber meta line (matches the web client) on top of the
          * lighter row background; heard rows fall back to dim */
@@ -151,13 +151,13 @@ void scr_inbox_refresh(void)
                               m->heard ? "" : "   -   new");
         lv_obj_set_style_text_font(meta, FONT_SMALL, 0);
         lv_obj_set_style_text_color(meta, m->heard ? COL_TEXT_DIM : COL_ACCENT, 0);
-        lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 58, -4);
+        lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, GEO_ROW_TEXT_X, -4);
 
         lv_obj_t *play = lv_label_create(row);
         lv_label_set_text(play, LV_SYMBOL_PLAY);
         lv_obj_set_style_text_font(play, FONT_TITLE, 0);
         lv_obj_set_style_text_color(play, COL_ACCENT, 0);
-        lv_obj_align(play, LV_ALIGN_RIGHT_MID, -6, 0);
+        lv_obj_align(play, LV_ALIGN_RIGHT_MID, GEO_ROW_PLAY_DX, 0);
 
         /* own reaction, tucked left of the play glyph */
         if (m->reaction[0]) {
@@ -168,13 +168,13 @@ void scr_inbox_refresh(void)
                 lv_image_set_scale(r, 96);          /* 64 px -> 24 px */
                 lv_obj_set_size(r, 24, 24);
                 lv_image_set_inner_align(r, LV_IMAGE_ALIGN_CENTER);
-                lv_obj_align(r, LV_ALIGN_RIGHT_MID, -46, 0);
+                lv_obj_align(r, LV_ALIGN_RIGHT_MID, GEO_ROW_REACT_DX, 0);
             } else if (ui_reaction_text(m->reaction)) {
                 lv_obj_t *r = lv_label_create(row);
                 lv_label_set_text(r, ui_reaction_text(m->reaction));
                 lv_obj_set_style_text_font(r, FONT_SMALL, 0);
                 lv_obj_set_style_text_color(r, COL_ACCENT, 0);
-                lv_obj_align(r, LV_ALIGN_RIGHT_MID, -46, 0);
+                lv_obj_align(r, LV_ALIGN_RIGHT_MID, GEO_ROW_REACT_DX, 0);
             }
         }
     }

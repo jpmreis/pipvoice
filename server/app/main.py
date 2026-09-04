@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+import threading
 
 import functools
 
@@ -18,7 +19,12 @@ from .cleanup import cleanup_loop
 
 logging.basicConfig(level=logging.INFO)
 db.init()
-themes.render_all()   # no-op when cached variants are current
+# Theme variants render in a thread: a no-op when cached, but the first
+# boot after a new rendition set (e.g. the per-board sizes) runs ~40
+# ffmpeg passes, and the deploy health check must not wait on them.
+# available() gates on files existing, so themes appear as they land.
+threading.Thread(target=themes.render_all, name="themes",
+                 daemon=True).start()
 
 app = FastAPI(title="Pip", docs_url=None, redoc_url=None)
 app.include_router(api_router)

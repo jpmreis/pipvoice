@@ -39,13 +39,20 @@ lv_opa_t ui_fg_opa(bool dim)
 
 void ui_fg_header(lv_obj_t *bar)
 {
-    /* children are the (optional) back button and the title label */
+    /* children are the (optional) back button/cluster and the title
+     * label; on the round header the cluster holds chevron + title, so
+     * recolor every label one level down too */
     for (uint32_t i = 0; i < lv_obj_get_child_count(bar); i++) {
         lv_obj_t *child = lv_obj_get_child(bar, (int32_t)i);
-        if (lv_obj_check_type(child, &lv_label_class))
+        if (lv_obj_check_type(child, &lv_label_class)) {
             ui_fg_label(child, false);
-        else if (lv_obj_get_child_count(child) > 0)
-            ui_fg_label(lv_obj_get_child(child, 0), false);
+            continue;
+        }
+        for (uint32_t j = 0; j < lv_obj_get_child_count(child); j++) {
+            lv_obj_t *gc = lv_obj_get_child(child, (int32_t)j);
+            if (lv_obj_check_type(gc, &lv_label_class))
+                ui_fg_label(gc, false);
+        }
     }
 }
 
@@ -86,15 +93,40 @@ lv_obj_t *mk_header(lv_obj_t *parent, const char *title,
 {
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_remove_style_all(bar);
-    lv_obj_set_size(bar, SCREEN_W, 56);
+    lv_obj_set_size(bar, SCREEN_W, GEO_HDR_H);
     lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);   /* overflowing back
                                                          button must not scroll */
 
+#if GEO_ROUND
+    /* a circle has no corner to hold a back button: chevron + title ride
+     * one centred cluster, and the whole cluster is the back target */
+    lv_obj_t *cl = lv_button_create(bar);
+    lv_obj_remove_style_all(cl);
+    lv_obj_set_size(cl, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(cl, LV_ALIGN_TOP_MID, 0, GEO_HDR_TITLE_Y);
+    lv_obj_set_flex_flow(cl, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(cl, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(cl, 8, 0);
+    if (back_btn) {
+        lv_obj_add_flag(cl, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(cl, 20);     /* generous touch target */
+        if (on_back) lv_obj_add_event_cb(cl, on_back, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *l = lv_label_create(cl);
+        lv_label_set_text(l, LV_SYMBOL_LEFT);
+        lv_obj_set_style_text_font(l, FONT_TITLE, 0);
+        lv_obj_set_style_text_color(l, COL_TEXT, 0);
+    }
+    lv_obj_t *t = lv_label_create(cl);
+    lv_label_set_text(t, title);
+    lv_obj_set_style_text_font(t, FONT_TITLE, 0);
+    lv_obj_set_style_text_color(t, COL_TEXT, 0);
+#else
     if (back_btn) {
         lv_obj_t *btn = lv_button_create(bar);
         lv_obj_remove_style_all(btn);
-        lv_obj_set_size(btn, 64, 56);          /* generous touch target */
+        lv_obj_set_size(btn, 64, GEO_HDR_H);   /* generous touch target */
         lv_obj_align(btn, LV_ALIGN_LEFT_MID, 0, 6);   /* clear the rounded
                                                          corner slightly */
         lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
@@ -111,7 +143,20 @@ lv_obj_t *mk_header(lv_obj_t *parent, const char *title,
     lv_obj_set_style_text_font(t, FONT_TITLE, 0);
     lv_obj_set_style_text_color(t, COL_TEXT, 0);
     lv_obj_center(t);
+#endif
     return bar;
+}
+
+/* the title label inside a mk_header bar (round: inside the cluster) -
+ * screens with dynamic titles (record, playback) retext it on show */
+lv_obj_t *mk_header_title(lv_obj_t *bar)
+{
+#if GEO_ROUND
+    lv_obj_t *cl = lv_obj_get_child(bar, 0);
+    return lv_obj_get_child(cl, (int32_t)lv_obj_get_child_count(cl) - 1);
+#else
+    return lv_obj_get_child(bar, (int32_t)lv_obj_get_child_count(bar) - 1);
+#endif
 }
 
 lv_obj_t *mk_button(lv_obj_t *parent, const char *txt, lv_color_t bg,
@@ -184,9 +229,9 @@ void ui_toast(const char *text, lv_color_t color)
     lv_obj_set_style_border_width(box, 2, 0);
     lv_obj_set_style_border_color(box, color, 0);
     lv_obj_set_style_pad_all(box, 14, 0);
-    lv_obj_set_width(box, SCREEN_W - 40);
+    lv_obj_set_width(box, GEO_TOAST_W);
     lv_obj_set_height(box, LV_SIZE_CONTENT);
-    lv_obj_align(box, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_align(box, LV_ALIGN_TOP_MID, 0, GEO_TOAST_Y);
 
     lv_obj_t *l = lv_label_create(box);
     lv_label_set_text(l, text);

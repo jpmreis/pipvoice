@@ -55,25 +55,33 @@
 #define UNIT_W_MAX        140
 #define UNIT_H            48
 
-#define AMBIENT_MARGIN    20
-#define AMBIENT_COLS      2
-#define AMBIENT_ROWS      8
-#define AMBIENT_STEP_X    188
-#define AMBIENT_STEP_Y    48
+/* The wander grid is per-board (ui_geometry.h): the 1.8 keeps its
+ * original 2x8 sixteen cells; the 2.16 grows to 2x9; the round 1.75-B
+ * insets to a 2x5 grid whose cells all sit inside r~200 - a circle
+ * cannot be asserted at compile time, so the round block's inscription
+ * was solved in the design pass and only the rectangular bounds are
+ * asserted here. */
+#define AMBIENT_X0        GEO_AMB_X0
+#define AMBIENT_Y0        GEO_AMB_Y0
+#define AMBIENT_COLS      GEO_AMB_COLS
+#define AMBIENT_ROWS      GEO_AMB_ROWS
+#define AMBIENT_STEP_X    GEO_AMB_STEP_X
+#define AMBIENT_STEP_Y    GEO_AMB_STEP_Y
 #define AMBIENT_CELLS     (AMBIENT_COLS * AMBIENT_ROWS)
 
-/* Margin and both steps are even on purpose: rounder_cb (board.c) aligns
+/* Origin and both steps are even on purpose: rounder_cb (board.c) aligns
  * QSPI flush windows to 2 px for this panel, so an odd offset buys nothing
  * and costs an extra column of redraw. */
-_Static_assert(AMBIENT_MARGIN % 2 == 0 && AMBIENT_STEP_X % 2 == 0 &&
+_Static_assert(AMBIENT_X0 % 2 == 0 && AMBIENT_Y0 % 2 == 0 &&
+               AMBIENT_STEP_X % 2 == 0 &&
                AMBIENT_STEP_Y % 2 == 0, "ambient grid offsets must be even");
 _Static_assert(AMBIENT_STEP_X >= UNIT_W_MAX && AMBIENT_STEP_Y >= UNIT_H,
                "ambient cells overlap: consecutive positions share pixels");
-_Static_assert(AMBIENT_MARGIN >= HOP_RISE,
+_Static_assert(AMBIENT_Y0 >= HOP_RISE,
                "top-row hops would leave the panel");
-_Static_assert(AMBIENT_MARGIN + (AMBIENT_COLS - 1) * AMBIENT_STEP_X +
+_Static_assert(AMBIENT_X0 + (AMBIENT_COLS - 1) * AMBIENT_STEP_X +
                UNIT_W_MAX <= SCREEN_W, "ambient grid overflows panel width");
-_Static_assert(AMBIENT_MARGIN + (AMBIENT_ROWS - 1) * AMBIENT_STEP_Y +
+_Static_assert(AMBIENT_Y0 + (AMBIENT_ROWS - 1) * AMBIENT_STEP_Y +
                UNIT_H <= SCREEN_H, "ambient grid overflows panel height");
 
 static lv_obj_t   *s_unit;      /* flex row: clock label + dot */
@@ -84,15 +92,27 @@ static lv_timer_t *s_tick;
 static uint8_t     s_cursor;    /* index into s_order; wraps */
 static char        s_shown[8];  /* clock text on the panel right now */
 
-/* Fixed shuffle of the 16 cells (cell = row * 2 + col): columns strictly
- * alternate and consecutive rows differ by at least 3 - the wrap from the
- * last entry back to the first included - so every move crosses most of
- * the panel. A table, so there is no RNG, no float and nothing to persist
- * across a reboot. */
+/* Fixed shuffle of the cells (cell = row * 2 + col): columns strictly
+ * alternate and consecutive rows differ by at least 2-3 - the wrap from
+ * the last entry back to the first included - so every move crosses most
+ * of the panel. A table per board size, so there is no RNG, no float and
+ * nothing to persist across a reboot. */
+#if AMBIENT_ROWS == 5          /* 1.75-B round: 10 cells */
+static const uint8_t s_order[AMBIENT_CELLS] = {
+     0,  7,  2,  9,  4,  1,  6,  3,  8,  5,
+};
+#elif AMBIENT_ROWS == 9        /* 2.16: 18 cells */
+static const uint8_t s_order[AMBIENT_CELLS] = {
+     0,  7, 12,  3, 16,  9,  2, 13,  6,
+    17, 10,  1, 14,  5,  8, 15,  4, 11,
+};
+#else                          /* 1.8: the original 16 cells */
 static const uint8_t s_order[AMBIENT_CELLS] = {
      0,  7, 12,  3,  8, 15,  4, 11,
      2, 13,  6,  1, 10,  5, 14,  9,
 };
+_Static_assert(AMBIENT_ROWS == 8, "no wander order for this grid size");
+#endif
 
 /* The greeting bounce, macOS-dock style: a crouch, then three diminishing
  * hops, stretched tall in the air and squashed flat on each landing.
@@ -160,8 +180,8 @@ static void dot_reset(void)
 static void cell_pos(int32_t *x, int32_t *y)
 {
     uint8_t cell = s_order[s_cursor];
-    *x = AMBIENT_MARGIN + (cell % AMBIENT_COLS) * AMBIENT_STEP_X;
-    *y = AMBIENT_MARGIN + (cell / AMBIENT_COLS) * AMBIENT_STEP_Y;
+    *x = AMBIENT_X0 + (cell % AMBIENT_COLS) * AMBIENT_STEP_X;
+    *y = AMBIENT_Y0 + (cell / AMBIENT_COLS) * AMBIENT_STEP_Y;
 }
 
 static void place(void)

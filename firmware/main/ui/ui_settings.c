@@ -105,8 +105,8 @@ lv_obj_t *scr_settings_create(void)
 
     lv_obj_t *col = lv_obj_create(s_scr);
     lv_obj_remove_style_all(col);
-    lv_obj_set_size(col, SCREEN_W - 24, SCREEN_H - 64);
-    lv_obj_align(col, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_set_size(col, GEO_SETTINGS_W, GEO_PICKER_H);
+    lv_obj_align(col, LV_ALIGN_TOP_MID, 0, GEO_PICKER_TOP);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(col, 12, 0);
     lv_obj_set_scroll_dir(col, LV_DIR_VER);

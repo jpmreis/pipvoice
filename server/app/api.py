@@ -278,15 +278,27 @@ def theme_set(ident: Identity = AuthDep, body: dict = Body(...)):
     return {"ok": True}
 
 
+def _board_param(board: str | None) -> str:
+    """?board= picks the panel rendition; absent = the 1.8 (legacy
+    firmware sends nothing and must keep getting its 368x448 bytes)."""
+    if board is None:
+        return boards.DEFAULT_BOARD
+    if not boards.valid(board):
+        raise HTTPException(404, "unknown board")
+    return board
+
+
 @router.get("/themes/{name}/device.bin")
-def theme_device(name: str, ident: Identity = AuthDep, v: str = None):
-    return _theme_asset(name, themes.device_path(name),
+def theme_device(name: str, ident: Identity = AuthDep, v: str = None,
+                 board: str = None):
+    return _theme_asset(name, themes.device_path(name, _board_param(board)),
                         "application/octet-stream", v)
 
 
 @router.get("/themes/{name}/thumb.bin")
-def theme_thumb(name: str, ident: Identity = AuthDep, v: str = None):
-    return _theme_asset(name, themes.thumb_path(name),
+def theme_thumb(name: str, ident: Identity = AuthDep, v: str = None,
+                board: str = None):
+    return _theme_asset(name, themes.thumb_path(name, _board_param(board)),
                         "application/octet-stream", v)
 
 
@@ -511,27 +523,28 @@ def _flash_manifest(device_id: str, nonce: str,
            "chip": {"family": "ESP32-S3", "psramCap": 1, "minFlashMB": 16},
            "flash": {"mode": "dio", "freqMHz": 80, "sizeMB": 16},
            "problem": None, "parts": []}
-    assets_v = provision.flash_assets_version()
+    assets_v = provision.flash_assets_version(board)
     if not fw:
         out["problem"] = (f"no firmware for the {b['label']} model yet"
                           if board != boards.DEFAULT_BOARD
                           else "no active firmware on the server")
     elif not assets_v:
-        out["problem"] = ("the server has no bootloader/partition-table "
-                          "files yet - upload them on the admin Firmware "
-                          "page")
+        out["problem"] = (f"the server has no bootloader/partition-table "
+                          f"files for the {b['label']} model yet - upload "
+                          "them on the admin Firmware page")
     else:
+        bq = f"?board={board}"
         out["parts"] = [
             {"name": "bootloader", "offset": 0x0,
-             "url": f"/v1/setup/asset/{assets_v}/bootloader.bin"},
+             "url": f"/v1/setup/asset/{assets_v}/bootloader.bin{bq}"},
             {"name": "partition-table", "offset": 0x8000,
-             "url": f"/v1/setup/asset/{assets_v}/parttable.bin"},
+             "url": f"/v1/setup/asset/{assets_v}/parttable.bin{bq}"},
             {"name": "nvs", "offset": 0x9000,
              "url": f"/v1/setup/nvs/{nonce}.bin"},
             {"name": "otadata", "offset": 0xF000,
              "url": "/v1/setup/asset/-/otadata.bin"},
             {"name": "app", "offset": 0x20000,
-             "url": f"/v1/firmware/{fw['version']}.bin"},
+             "url": f"/v1/firmware/{fw['version']}.bin{bq}"},
         ]
     return out
 
@@ -609,7 +622,8 @@ def setup_online(device_id: str, ident: Identity = AuthDep):
 
 
 @router.get("/setup/asset/{version}/{name}.bin")
-def setup_asset(version: str, name: str, ident: Identity = AuthDep):
+def setup_asset(version: str, name: str, ident: Identity = AuthDep,
+                board: str = None):
     if name == "otadata":
         # 0x2000 of 0xFF = erased otadata: the bootloader boots ota_0
         return Response(b"\xff" * 0x2000,
@@ -617,7 +631,7 @@ def setup_asset(version: str, name: str, ident: Identity = AuthDep):
     if name not in provision.ASSET_KINDS or \
             not re.fullmatch(r"[A-Za-z0-9._-]{1,32}", version):
         raise HTTPException(404, "no such asset")
-    path = provision.asset_path(version, name)
+    path = provision.asset_path(version, name, _board_param(board))
     if not os.path.exists(path):
         raise HTTPException(404, "no such asset")
     return FileResponse(path, media_type="application/octet-stream")
@@ -915,14 +929,26 @@ def firmware_manifest(ident: Identity = AuthDep):
     if not fw or not base:   # no active build, or no absolute URL to offer
         return JSONResponse({"version": None})
     return {"version": fw["version"],
-            "url": f"{base}/v1/firmware/{fw['version']}.bin"}
+            "url": f"{base}/v1/firmware/{fw['version']}.bin?board={board}"}
 
 
 @router.get("/firmware/{version}.bin")
-def firmware_download(version: str, ident: Identity = AuthDep):
+def firmware_download(version: str, ident: Identity = AuthDep,
+                      board: str = None):
+    """A device identity always gets ITS board's build, whatever the
+    query says - the cross-flash-impossible guarantee holds even for a
+    hand-crafted URL. Browser/phone callers (the web flasher) pass
+    ?board=; absent means the 1.8 (legacy OTA URLs)."""
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,32}", version):
         raise HTTPException(400, "bad version")
-    path = db.firmware_path(version)
+    resolved = _board_param(board)
+    if ident.device_id:
+        with db.conn() as c:
+            row = db.one(c, "SELECT board FROM devices WHERE id=?",
+                         (ident.device_id,))
+        if row:
+            resolved = row["board"]
+    path = db.firmware_path(version, resolved)
     if not os.path.exists(path):
         raise HTTPException(404, "no such firmware")
     return FileResponse(path, media_type="application/octet-stream")
