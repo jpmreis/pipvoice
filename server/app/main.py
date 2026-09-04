@@ -31,14 +31,28 @@ app.include_router(api_router)
 app.include_router(admin_router)
 
 
+# /app assets that may cache for a day; everything else under /app is the
+# shell and must revalidate on every load - StaticFiles sends no
+# Cache-Control, and iOS then heuristic-caches (~10% of Last-Modified age)
+# and serves the old shell without asking, defeating the service worker's
+# network-first fetch even across a force-quit
+_APP_LONG_CACHE = ("/app/fonts/", "/app/icons/", "/app/vendor/",
+                   "/app/boards/")
+
+
 @app.middleware("http")
 async def _stamp_version(request, call_next):
     # every /v1 response carries the global version, so the PWA notices an
     # update on its next API interaction instead of waiting out the poll -
     # the browser-side stand-in for the devices' MQTT firmware notify
     resp = await call_next(request)
-    if request.url.path.startswith("/v1/"):
+    path = request.url.path
+    if path.startswith("/v1/"):
         resp.headers["X-Pip-Version"] = api.global_version()
+    elif path.startswith("/app"):
+        resp.headers["Cache-Control"] = (
+            "public, max-age=86400" if path.startswith(_APP_LONG_CACHE)
+            else "no-cache")           # revalidate: ETag makes this a 304
     return resp
 
 # the phone-user PWA: /app/ (html=True serves index.html at the root)
