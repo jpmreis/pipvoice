@@ -33,6 +33,9 @@ typedef struct {
     bool     voice_enabled;    /* server-set accessibility flag (admin
                                   "Voice control"); mirrored here so the
                                   box listens from boot while offline    */
+    char     board[16];        /* hardware model the server provisioned
+                                  ("" on pre-multi-model NVS); app_main
+                                  warns if it differs from PIP_BOARD_NAME */
 } app_config_t;
 
 extern app_config_t g_cfg;

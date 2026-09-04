@@ -1,8 +1,9 @@
 {% extends "base.html" %}{% block content %}
 <h1>Devices</h1>
 <div class="card"><table>
-<tr><th>Device</th><th>Owner</th><th>Device admin</th><th>Voice control</th><th>Created</th><th>Last seen</th><th></th><th></th></tr>
-{% for d in devices %}<tr><td>{{ d.id }}</td><td>{{ d.display_name }}</td>
+<tr><th>Device</th><th>Model</th><th>Owner</th><th>Device admin</th><th>Voice control</th><th>Created</th><th>Last seen</th><th></th><th></th></tr>
+{% for d in devices %}<tr><td>{{ d.id }}</td>
+<td class="muted">{{ d.board }}</td><td>{{ d.display_name }}</td>
 <td><form method="post" action="/admin/devices/{{ d.id }}/admin" style="display:flex;gap:6px;align-items:center">
 <select name="admin_id"><option value="">&mdash; none &mdash;</option>{% for u in users %}
 <option value="{{ u.id }}" {{ "selected" if u.id == d.admin_id }}>{{ u.display_name }}</option>{% endfor %}</select>

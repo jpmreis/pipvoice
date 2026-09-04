@@ -14,8 +14,8 @@ from fastapi import (APIRouter, BackgroundTasks, Body, Form, HTTPException,
                      Request, UploadFile)
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from . import (db, emails, mqtt, notify, presence, provision, push, themes,
-               vmsg, voice)
+from . import (boards, db, emails, mqtt, notify, presence, provision, push,
+               themes, vmsg, voice)
 from .auth import (LOCAL_AUTH, AuthDep, Identity, client_ip, create_session,
                    issue_login_code, login_blocked, login_failed,
                    login_succeeded, redeem_login_code, token_hash,
@@ -499,17 +499,23 @@ def _no_device_tokens(ident: Identity) -> None:
         raise HTTPException(403, "not available to devices")
 
 
-def _flash_manifest(device_id: str, nonce: str) -> dict:
+def _flash_manifest(device_id: str, nonce: str,
+                    board: str = boards.DEFAULT_BOARD) -> dict:
+    b = boards.BOARDS[board]
     with db.conn() as c:
         fw = db.one(c, "SELECT version FROM firmware WHERE active=1 "
-                       "ORDER BY created DESC LIMIT 1")
+                       "AND board=? ORDER BY created DESC LIMIT 1", (board,))
     out = {"device_id": device_id, "version": fw["version"] if fw else None,
+           "board": board, "board_name": b["full_name"],
+           "board_label": b["label"],
            "chip": {"family": "ESP32-S3", "psramCap": 1, "minFlashMB": 16},
            "flash": {"mode": "dio", "freqMHz": 80, "sizeMB": 16},
            "problem": None, "parts": []}
     assets_v = provision.flash_assets_version()
     if not fw:
-        out["problem"] = "no active firmware on the server"
+        out["problem"] = (f"no firmware for the {b['label']} model yet"
+                          if board != boards.DEFAULT_BOARD
+                          else "no active firmware on the server")
     elif not assets_v:
         out["problem"] = ("the server has no bootloader/partition-table "
                           "files yet - upload them on the admin Firmware "
@@ -530,24 +536,43 @@ def _flash_manifest(device_id: str, nonce: str) -> dict:
     return out
 
 
+@router.get("/setup/boards")
+def setup_boards(ident: Identity = AuthDep):
+    """The model catalog for the setup page's picker. A model is
+    flashable only once the server holds an active firmware build for
+    it - the picker greys out the rest."""
+    _no_device_tokens(ident)
+    with db.conn() as c:
+        have = {r["board"] for r in db.all_(
+            c, "SELECT DISTINCT board FROM firmware WHERE active=1")}
+    return [{"board": key, "label": b["label"], "name": b["full_name"],
+             "blurb": b["blurb"], "screen": b["screen"],
+             "img": f"boards/{key}.jpg", "img_back": f"boards/{key}-back.jpg",
+             "available": key in have}
+            for key, b in boards.BOARDS.items()]
+
+
 @router.post("/setup/device")
 def setup_device(ident: Identity = AuthDep, body: dict = Body(...)):
     """Create a device user + device; the caller becomes device admin and
-    first contact. Returns the flash manifest for the new box."""
+    first contact. Returns the flash manifest for the new box. The
+    chosen board model is recorded on the device row and in the NVS
+    image - OTA serves only that model's builds from then on."""
     _no_device_tokens(ident)
     rl_key = f"setup:{ident.user_id}"
     if login_blocked(rl_key):
         raise HTTPException(429, "too many devices created - try again later")
     login_failed(rl_key)     # every attempt counts toward the cap
+    board = str(body.get("board", "") or boards.DEFAULT_BOARD)
     created = provision.create_device_user(
         ident.user_id, str(body.get("name", "")),
         str(body.get("username", "")), str(body.get("pin", "")),
-        str(body.get("server_url", "")))
+        str(body.get("server_url", "")), board)
     _notify_contacts_changed(ident.user_id, created["user_id"])
     return {"device_id": created["device_id"],
             "username": created["username"],
             "manifest": _flash_manifest(created["device_id"],
-                                        created["nvs_nonce"])}
+                                        created["nvs_nonce"], board)}
 
 
 @router.post("/setup/{device_id}/rekey")
@@ -559,13 +584,15 @@ def setup_rekey(device_id: str, ident: Identity = AuthDep,
     _no_device_tokens(ident)
     with db.conn() as c:
         dev = _flashable_device(c, device_id, ident)
+        board = db.one(c, "SELECT board FROM devices WHERE id=?",
+                       (device_id,))["board"]
     nonce = provision.rekey_device(device_id, dev["display_name"],
                                    str(body.get("pin", "")),
                                    str(body.get("server_url", "")))
     # name: a deep-linked flash (?flash=<id>) may target a device outside
     # the caller's /managed list, so the flasher can't look it up there
     return {"device_id": device_id, "name": dev["display_name"],
-            "manifest": _flash_manifest(device_id, nonce)}
+            "manifest": _flash_manifest(device_id, nonce, board)}
 
 
 @router.get("/setup/{device_id}/online")
@@ -870,9 +897,20 @@ def presence_get(ident: Identity = AuthDep):
 # ---------- firmware / OTA ----------
 @router.get("/firmware")
 def firmware_manifest(ident: Identity = AuthDep):
+    """Per-model: a box is only ever offered builds for the board recorded
+    on its device row at provisioning (ota.c updates on ANY version
+    difference, so serving a foreign model's build would flash it). The
+    retained firmware notify still fans out to the whole fleet - that is
+    harmless, boxes just re-check here."""
+    board = boards.DEFAULT_BOARD
     with db.conn() as c:
+        if ident.device_id:
+            row = db.one(c, "SELECT board FROM devices WHERE id=?",
+                         (ident.device_id,))
+            if row:
+                board = row["board"]
         fw = db.one(c, "SELECT version FROM firmware WHERE active=1 "
-                       "ORDER BY created DESC LIMIT 1")
+                       "AND board=? ORDER BY created DESC LIMIT 1", (board,))
     base = (db.env("BASE_URL", "") or "").rstrip("/")
     if not fw or not base:   # no active build, or no absolute URL to offer
         return JSONResponse({"version": None})

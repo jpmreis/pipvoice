@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS devices (
     mqtt_password TEXT NOT NULL,
     created TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen TEXT,
-    voice INTEGER NOT NULL DEFAULT 0    -- accessibility voice control
+    voice INTEGER NOT NULL DEFAULT 0,   -- accessibility voice control
+    board TEXT NOT NULL DEFAULT 'amoled-1.8'  -- hardware model (boards.py)
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -76,7 +77,8 @@ CREATE TABLE IF NOT EXISTS firmware (
     version TEXT PRIMARY KEY,
     notes TEXT DEFAULT '',
     active INTEGER NOT NULL DEFAULT 0,
-    created TEXT NOT NULL DEFAULT (datetime('now'))
+    created TEXT NOT NULL DEFAULT (datetime('now')),
+    board TEXT NOT NULL DEFAULT 'amoled-1.8'  -- hardware model (boards.py)
 );
 CREATE TABLE IF NOT EXISTS reactions ( -- one per message, latest wins;
     msg_id TEXT PRIMARY KEY,           -- no FK to messages: a reaction must
@@ -111,6 +113,11 @@ MIGRATIONS = [
     "ALTER TABLE messages ADD COLUMN delivered_at TEXT",
     # accessibility: hands-free voice control on this box (admin toggle)
     "ALTER TABLE devices ADD COLUMN voice INTEGER NOT NULL DEFAULT 0",
+    # hardware model (boards.py key); every pre-existing box is a 1.8.
+    # Recorded at provisioning and never changed by rekey: OTA and the
+    # flash manifest only ever serve this model's artifacts.
+    "ALTER TABLE devices ADD COLUMN board TEXT NOT NULL DEFAULT 'amoled-1.8'",
+    "ALTER TABLE firmware ADD COLUMN board TEXT NOT NULL DEFAULT 'amoled-1.8'",
 ]
 
 

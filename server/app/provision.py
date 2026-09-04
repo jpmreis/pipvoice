@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException
 
-from . import db, mqtt
+from . import boards, db, mqtt
 from .auth import new_token
 
 # 16 avatar colors that read well on the black theme (admin imports this)
@@ -36,7 +36,8 @@ _BASE_URL_RE = re.compile(r"https?://[A-Za-z0-9._~:/\-\[\]]{1,110}")
 
 
 def build_nvs_csv(device_id: str, device_name: str, token_raw: str,
-                  mqtt_pass: str, pin: str, base_url: str = "") -> str:
+                  mqtt_pass: str, pin: str, base_url: str = "",
+                  board: str = boards.DEFAULT_BOARD) -> str:
     """CSV for nvs_partition_gen (namespace pipcfg). No wifi keys: a box
     with zero networks auto-opens its WiFi setup QR (firmware >=0.1.28).
     base_url overrides PIP_BASE_URL as the URL written to the device —
@@ -71,6 +72,7 @@ def build_nvs_csv(device_id: str, device_name: str, token_raw: str,
         f"mqtt_pass,data,string,{mqtt_pass}",
         f"pin_salt,data,string,{pin_salt}",
         f"pin_hash,data,string,{pin_hash}",
+        f"board,data,string,{board}",
         "",
     ])
 
@@ -121,15 +123,15 @@ def stash_get(nonce: str):
 
 
 # ---------- device + user creation ----------
-def insert_device(c, device_id: str, user_id: int,
-                  admin_id=None) -> tuple[str, str]:
+def insert_device(c, device_id: str, user_id: int, admin_id=None,
+                  board: str = boards.DEFAULT_BOARD) -> tuple[str, str]:
     """Insert the device row; returns (token_raw, mqtt_pass). Caller owns
     the transaction and calls mqtt.provision_device once it commits."""
     token_raw, token_h = new_token()
     mqtt_pass = secrets.token_urlsafe(12)
     c.execute("""INSERT INTO devices (id,user_id,token_hash,mqtt_password,
-                 admin_id) VALUES (?,?,?,?,?)""",
-              (device_id, user_id, token_h, mqtt_pass, admin_id))
+                 admin_id,board) VALUES (?,?,?,?,?,?)""",
+              (device_id, user_id, token_h, mqtt_pass, admin_id, board))
     return token_raw, mqtt_pass
 
 
@@ -145,10 +147,13 @@ def derive_device_id(c, username: str) -> str:
 
 
 def create_device_user(creator_id: int, name: str, username: str,
-                       pin: str, base_url: str = "") -> dict:
+                       pin: str, base_url: str = "",
+                       board: str = boards.DEFAULT_BOARD) -> dict:
     """PWA setup flow: new device user + device, creator becomes device
     admin and first contact (symmetric perms). Returns ids + the NVS
-    stash nonce for the browser flasher."""
+    stash nonce for the browser flasher. The board (hardware model) is
+    recorded on the device row and baked into the NVS image - it is the
+    fact that keeps per-model OTA from ever cross-flashing a box."""
     name = name.strip()
     username = username.strip().lstrip("@").lower()
     pin = pin.strip()
@@ -159,6 +164,8 @@ def create_device_user(creator_id: int, name: str, username: str,
                                  "a-z, 0-9, _")
     if not re.fullmatch(r"\d{4}", pin):
         raise HTTPException(400, "Settings PIN must be 4 digits")
+    if not boards.valid(board):
+        raise HTTPException(400, "unknown board model")
 
     with db.conn() as c:
         if db.one(c, "SELECT 1 FROM users WHERE username=?", (username,)):
@@ -173,14 +180,14 @@ def create_device_user(creator_id: int, name: str, username: str,
                      (username,))["id"]
         device_id = derive_device_id(c, username)
         token_raw, mqtt_pass = insert_device(c, device_id, uid,
-                                             admin_id=creator_id)
+                                             admin_id=creator_id, board=board)
         # the creator is the box's first contact, both directions
         c.execute("INSERT OR IGNORE INTO perms VALUES (?,?)", (uid, creator_id))
         c.execute("INSERT OR IGNORE INTO perms VALUES (?,?)", (creator_id, uid))
 
     mqtt.provision_device(device_id, mqtt_pass)
     blob = build_nvs_bin(build_nvs_csv(device_id, name, token_raw,
-                                       mqtt_pass, pin, base_url))
+                                       mqtt_pass, pin, base_url, board))
     return {"device_id": device_id, "user_id": uid, "username": username,
             "nvs_nonce": stash_put(device_id, blob)}
 
@@ -195,7 +202,7 @@ def rekey_device(device_id: str, device_name: str, pin: str,
         raise HTTPException(400, "Settings PIN must be 4 digits")
     token_raw, token_h = new_token()
     with db.conn() as c:
-        dev = db.one(c, "SELECT mqtt_password FROM devices WHERE id=?",
+        dev = db.one(c, "SELECT mqtt_password, board FROM devices WHERE id=?",
                      (device_id,))
         if not dev:
             raise HTTPException(404, "no such device")
@@ -204,8 +211,11 @@ def rekey_device(device_id: str, device_name: str, pin: str,
         mqtt_pass = dev["mqtt_password"]
     # broker creds unchanged but re-assert them (repairs a lost passwd file)
     mqtt.provision_device(device_id, mqtt_pass)
+    # board comes from the row, never the caller: the hardware model of an
+    # existing box is a fact, not a choice - a rekey must not change it
     blob = build_nvs_bin(build_nvs_csv(device_id, device_name, token_raw,
-                                       mqtt_pass, pin, base_url))
+                                       mqtt_pass, pin, base_url,
+                                       dev["board"]))
     return stash_put(device_id, blob)
 
 

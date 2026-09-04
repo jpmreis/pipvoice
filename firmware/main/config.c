@@ -107,6 +107,7 @@ void config_load(void)
     get_str(h, "theme", g_cfg.theme_name, sizeof(g_cfg.theme_name), "");
     g_cfg.theme_black_text = get_u32(h, "theme_fg", 0) != 0;
     g_cfg.voice_enabled    = get_u32(h, "voice_en", 0) != 0;
+    get_str(h, "board",       g_cfg.board,       sizeof(g_cfg.board),       "");
 
     /* WiFi network list; migrate the legacy single-network keys into it.
      * Zero networks is a valid state: app_main auto-opens WiFi setup. */

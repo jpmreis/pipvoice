@@ -22,7 +22,7 @@ import re
 import urllib.request
 from urllib.parse import urljoin
 
-from . import db, provision
+from . import boards, db, provision
 
 log = logging.getLogger("release")
 
@@ -62,10 +62,27 @@ def install() -> str:
     if not re.fullmatch(_VERSION_RE, version):
         raise ValueError(f"manifest has a bad version: {version!r}")
 
-    build = next((b for b in m.get("builds", [])
-                  if b.get("chipFamily") == CHIP_FAMILY), None)
+    # Builds are per board (boards.py). Until firmware storage is
+    # board-scoped ({version}.bin collides across boards), only the
+    # default board's build is ingested; other known boards are logged
+    # and skipped, an unknown board name is a hard error (a silent
+    # first-match here once meant a wrong-model flash was possible).
+    build = None
+    for b in m.get("builds", []):
+        if b.get("chipFamily") != CHIP_FAMILY:
+            continue
+        key = boards.by_manifest_name(b.get("board", ""))
+        if key is None:
+            raise ValueError(f"manifest names an unknown board: "
+                             f"{b.get('board')!r}")
+        if key != boards.DEFAULT_BOARD:
+            log.info("release %s: skipping %s build (multi-board storage "
+                     "not implemented yet)", version, key)
+            continue
+        build = b
     if not build:
-        raise ValueError(f"manifest has no {CHIP_FAMILY} build")
+        raise ValueError(f"manifest has no {CHIP_FAMILY} build for the "
+                         f"{boards.DEFAULT_BOARD} board")
     parts = build.get("parts", [])
     kinds = {p.get("kind") for p in parts}
     if not {"app", "bootloader", "parttable"} <= kinds:
@@ -103,6 +120,7 @@ def install() -> str:
         log.info("release %s: %s ok (%d bytes)", version, kind, len(data))
 
     with db.conn() as c:                 # inactive; admin activates when ready
-        c.execute("""INSERT OR IGNORE INTO firmware (version, notes, active)
-                     VALUES (?,?,0)""", (version, "GitHub release"))
+        c.execute("""INSERT OR IGNORE INTO firmware
+                     (version, notes, active, board) VALUES (?,?,0,?)""",
+                  (version, "GitHub release", boards.DEFAULT_BOARD))
     return f"installed {version} - activate it when ready"

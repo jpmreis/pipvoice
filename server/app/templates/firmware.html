@@ -2,8 +2,9 @@
 <h1>Firmware / OTA</h1>
 {% if msg %}<div class="card"><p>{{ msg }}</p></div>{% endif %}
 <div class="card"><table>
-<tr><th>Version</th><th>Notes</th><th>Uploaded</th><th>Flash bundle</th><th>Status</th><th></th></tr>
-{% for f in firmwares %}<tr><td>{{ f.version }}</td><td>{{ f.notes }}</td>
+<tr><th>Version</th><th>Model</th><th>Notes</th><th>Uploaded</th><th>Flash bundle</th><th>Status</th><th></th></tr>
+{% for f in firmwares %}<tr><td>{{ f.version }}</td>
+<td class="muted">{{ f.board }}</td><td>{{ f.notes }}</td>
 <td class="muted">{{ f.created[:16] }}</td>
 <td class="muted">{% if bundles[f.version] %}complete{% else %}app only{% endif %}</td>
 <td>{% if f.active %}<span class="ok">ACTIVE</span>{% endif %}</td>

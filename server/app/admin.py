@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from urllib.parse import quote
 
-from . import api, db, emails, mqtt, provision, release, voice
+from . import api, boards, db, emails, mqtt, provision, release, voice
 from .auth import (LOCAL_AUTH, AdminDep, Identity, client_ip, create_session,
                    hash_password, issue_login_code, login_blocked,
                    login_failed, login_succeeded, redeem_login_code,
@@ -388,9 +388,12 @@ async def firmware_upload(ident: Identity = AdminDep,
                           version: str = Form(...), notes: str = Form(""),
                           activate: str = Form(None), file: UploadFile = None,
                           bootloader: UploadFile = None,
-                          parttable: UploadFile = None):
+                          parttable: UploadFile = None,
+                          board: str = Form(boards.DEFAULT_BOARD)):
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,32}", version) or ".." in version:
         raise HTTPException(400, "version must be [A-Za-z0-9._-], max 32 chars")
+    if not boards.valid(board):
+        raise HTTPException(400, "unknown board model")
     data = await file.read()
     with open(db.firmware_path(version), "wb") as f:
         f.write(data)
@@ -403,9 +406,11 @@ async def firmware_upload(ident: Identity = AdminDep,
                 f.write(blob)
     with db.conn() as c:
         if activate:
-            c.execute("UPDATE firmware SET active=0")
-        c.execute("""INSERT OR REPLACE INTO firmware (version,notes,active)
-                     VALUES (?,?,?)""", (version, notes, 1 if activate else 0))
+            # active is per board: each model has its own rollout
+            c.execute("UPDATE firmware SET active=0 WHERE board=?", (board,))
+        c.execute("""INSERT OR REPLACE INTO firmware (version,notes,active,
+                     board) VALUES (?,?,?,?)""",
+                  (version, notes, 1 if activate else 0, board))
     if activate:
         api.version_bumped()
         mqtt.notify_all('{"event":"firmware","version":"%s"}' % version)
@@ -415,7 +420,13 @@ async def firmware_upload(ident: Identity = AdminDep,
 @router.post("/firmware/{version}/activate")
 def firmware_activate(version: str, ident: Identity = AdminDep):
     with db.conn() as c:
-        c.execute("UPDATE firmware SET active=0")
+        fw = db.one(c, "SELECT board FROM firmware WHERE version=?",
+                    (version,))
+        if not fw:
+            raise HTTPException(404, "no such firmware")
+        # active is per board: activating a build only rolls out its model
+        c.execute("UPDATE firmware SET active=0 WHERE board=?",
+                  (fw["board"],))
         c.execute("UPDATE firmware SET active=1 WHERE version=?", (version,))
     api.version_bumped()
     mqtt.notify_all('{"event":"firmware","version":"%s"}' % version)

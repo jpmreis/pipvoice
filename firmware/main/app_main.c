@@ -537,11 +537,21 @@ void app_main(void)
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     /* machine-readable hardware verdict, matched by the web flasher's
-     * verify step (display is ok by construction - board_init aborts) */
-    ESP_LOGI(TAG, "PIP-HW display=ok touch=%s pmu=%s codec=%s",
+     * verify step (display is ok by construction - board_init aborts).
+     * board= is the model this image was compiled for; the flasher
+     * cross-checks it against the model picked at setup, and peripheral
+     * failures alongside it read as "wrong model flashed". */
+    ESP_LOGI(TAG, "PIP-HW board=%s display=ok touch=%s pmu=%s codec=%s",
+             PIP_BOARD_NAME,
              board_touch_ok() ? "ok" : "missing",
              board_pmu_ok()   ? "ok" : "missing",
              audio_codec_ok() ? "ok" : "err");
+
+    /* the server records each box's model and bakes it into NVS; a
+     * mismatch here means OTA bookkeeping went wrong somewhere */
+    if (g_cfg.board[0] && strcmp(g_cfg.board, PIP_BOARD_NAME) != 0)
+        ESP_LOGW(TAG, "provisioned as board '%s' but this image is built "
+                 "for '%s'", g_cfg.board, PIP_BOARD_NAME);
 
     /* fresh box (web-flashed, no WiFi yet): open WiFi setup with its QR
      * instead of sitting on "connecting". The splash is already over by

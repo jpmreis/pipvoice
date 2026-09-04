@@ -11,13 +11,26 @@ import { ESPLoader, Transport } from "./vendor/esptool-js.js";
 
 const $ = (id) => document.getElementById(id);
 const ESPRESSIF_USB_VID = 0x303a;
-const BOARD_HELP = "Pip runs on the Waveshare ESP32-S3-Touch-AMOLED-1.8 " +
-  "board. This device doesn't match it.";
+const DEFAULT_BOARD = "amoled-1.8";
 
 let manifest = null;          // parts + chip gates, from create/rekey
 let flashName = "";           // display name for the box being flashed
 let flashStartMs = 0;         // last_seen newer than this = box is online
 let port = null;
+let boardCatalog = [];        // /v1/setup/boards; drives the model picker
+let selectedBoard = DEFAULT_BOARD;
+
+function boardName(key) {
+  const b = boardCatalog.find((x) => x.board === key);
+  return b ? b.name : "Waveshare ESP32-S3-Touch-AMOLED-1.8";
+}
+
+// board of the image being flashed: the manifest's, else the picker's
+function boardHelp() {
+  const key = (manifest && manifest.board) || selectedBoard;
+  return `Pip needs the ${boardName(key)} board - ` +
+         "this device doesn't match it.";
+}
 
 function state(id) {
   for (const s of ["st-unsupported", "st-login", "st-start", "st-flash",
@@ -66,6 +79,7 @@ async function init() {
   catch (e) { state("st-login"); return; }
   state("st-start");
   if (!$("nu-server").value) $("nu-server").value = location.origin;
+  loadBoards();               // model picker; optional, defaults to the 1.8
   /* ?flash=<device_id> deep link (Settings -> Manage device, admin
      Devices page): jump straight to re-flashing that box. Server admins
      can flash devices outside their /managed list, so an unknown id
@@ -107,6 +121,43 @@ async function init() {
   }
 }
 
+/* The model picker. The server says which models have firmware; the
+ * rest render greyed out as "coming soon". If the endpoint is missing
+ * or fails (older server), the picker stays hidden and the default
+ * board is used - exactly the pre-multi-model behavior. */
+async function loadBoards() {
+  try { boardCatalog = await api("/setup/boards"); }
+  catch { return; }
+  if (!Array.isArray(boardCatalog) || boardCatalog.length < 2) return;
+  const grid = $("board-grid");
+  grid.innerHTML = "";
+  for (const b of boardCatalog) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "board-opt" + (b.available ? "" : " soon");
+    el.innerHTML = `<img alt=""><div class="bl"></div><div class="bs"></div>`;
+    el.querySelector("img").src = b.img;
+    el.querySelector(".bl").textContent = b.label;
+    el.querySelector(".bs").textContent = b.blurb;
+    el.title = b.name;
+    if (!b.available) {
+      const badge = document.createElement("div");
+      badge.className = "badge";
+      badge.textContent = "coming soon";
+      el.appendChild(badge);
+    }
+    el.onclick = () => {
+      if (!b.available) return;
+      selectedBoard = b.board;
+      for (const o of grid.children) o.classList.remove("sel");
+      el.classList.add("sel");
+    };
+    if (b.board === selectedBoard && b.available) el.classList.add("sel");
+    grid.appendChild(el);
+  }
+  $("board-card").style.display = "block";
+}
+
 async function create() {
   $("nu-err").textContent = "";
   const name = $("nu-name").value.trim();
@@ -121,7 +172,8 @@ async function create() {
   $("nu-create").disabled = true;
   try {
     const r = await apiJson("/setup/device",
-                            { name, username, pin, server_url });
+                            { name, username, pin, server_url,
+                              board: selectedBoard });
     startFlash(name, r.device_id, r.manifest, "nu-err");
   } catch (e) {
     $("nu-err").textContent = friendly(e);
@@ -155,7 +207,8 @@ function startFlash(name, deviceId, mf, errBox) {
   flashName = name;
   flashStartMs = Date.now();
   $("fl-name").textContent = name;
-  $("fl-device").textContent = deviceId;
+  $("fl-device").textContent = deviceId +
+    (mf.board_label ? " · " + mf.board_label + " model" : "");
   for (const s of ["stp-connect", "stp-check", "stp-flash", "stp-verify"])
     step(s, s === "stp-connect" ? "act" : "dimmed");
   $("fl-connect").style.display = "block";
@@ -205,7 +258,7 @@ async function run() {
     try { await transport.disconnect(); } catch {}
     fail("stp-check", "No ESP32 responded on that port. Unplug the box, " +
          "plug it back in and try again (or hold the top button while " +
-         "plugging in). If this isn't a Pip box: " + BOARD_HELP);
+         "plugging in). If this isn't a Pip box: " + boardHelp());
     return;
   }
 
@@ -213,20 +266,20 @@ async function run() {
     const chipName = esploader.chip.CHIP_NAME;
     if (chipName !== manifest.chip.family) {
       fail("stp-check", `This is an ${chipName} - Pip needs an ` +
-           `${manifest.chip.family}. ${BOARD_HELP}`);
+           `${manifest.chip.family}. ${boardHelp()}`);
       return;
     }
     const psram = await esploader.chip.getPsramCap(esploader);
     if (psram !== manifest.chip.psramCap) {
       fail("stp-check", "This chip doesn't have the 8 MB PSRAM Pip needs " +
-           "(the firmware cannot boot on it). " + BOARD_HELP);
+           "(the firmware cannot boot on it). " + boardHelp());
       return;
     }
     const sizeStr = await esploader.detectFlashSize();   // e.g. "16MB"
     const mb = parseInt(sizeStr, 10) || 0;
     if (mb < manifest.chip.minFlashMB) {
       fail("stp-check", `This board has ${sizeStr} of flash - Pip needs ` +
-           `${manifest.chip.minFlashMB} MB. ${BOARD_HELP}`);
+           `${manifest.chip.minFlashMB} MB. ${boardHelp()}`);
       return;
     }
     step("stp-check", "ok");
@@ -399,10 +452,33 @@ async function verify(transport) {
     return;
   }
   if (complete || hw) {
+    /* PIP-HW is k=v pairs; `board=` (firmware >= 1.3.6) is the model the
+     * image was compiled for, everything else is a peripheral verdict.
+     * Peripheral failures + a model mismatch = the wrong image is on the
+     * box (the classic cross-flash: the hardware "works" but its touch/
+     * codec drivers are for another model's chips). */
     const problems = [];
+    let imgBoard = null;
     for (const kv of (hw || "").trim().split(/\s+/)) {
       const [k, v] = kv.split("=");
+      if (k === "board") { imgBoard = v; continue; }
       if (v && v !== "ok") problems.push(k);
+    }
+    if (imgBoard && manifest.board && imgBoard !== manifest.board) {
+      // server bookkeeping error: the artifact itself is for another model
+      fail("stp-verify", `The installed firmware is built for the ` +
+           `${boardName(imgBoard)} but this box is registered as a ` +
+           `${boardName(manifest.board)}. Start over and flash again - ` +
+           "if it repeats, ask for help.");
+      return;
+    }
+    if (problems.length && imgBoard) {
+      fail("stp-verify", "The firmware started but its " +
+           problems.join(", ") + " did not respond. This usually means " +
+           `the box is not a ${boardName(imgBoard)} (the model that was ` +
+           "picked) - check the model, then start over to flash it " +
+           "with the right firmware.");
+      return;
     }
     const notes = problems.length
       ? "The box started, but reported problems with: " +
@@ -412,8 +488,9 @@ async function verify(transport) {
     finish(notes);
   } else if (resets >= 3) {
     fail("stp-verify", "The chip is fine, but the firmware couldn't start " +
-         "- most likely this board isn't the Pip board (its screen never " +
-         "initialized). " + BOARD_HELP);
+         "- most likely this box isn't the model you picked (its screen " +
+         "never initialized). " + boardHelp() + " Check the model and " +
+         "start over to flash the right firmware.");
   } else {
     softDone("We couldn't confirm the startup over USB. If the box's " +
              "screen shows the Pip hello and then a QR code, everything " +
