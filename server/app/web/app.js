@@ -834,11 +834,15 @@ $("btn-settings").onclick = () => {
   show("scr-settings");
 };
 $("set-back").onclick = home;
-$("set-background").onclick = () => {
+/* Guarded: a phone can briefly run this app.js against a stale cached
+   index.html without these elements - an unguarded binding here throws
+   and kills the whole script before boot() ever hides the splash. */
+const _setBg = $("set-background"), _bgBack = $("bg-back");
+if (_setBg) _setBg.onclick = () => {
   loadThemes().catch(() => {});
   show("scr-background");
 };
-$("bg-back").onclick = () => show("scr-settings");
+if (_bgBack) _bgBack.onclick = () => show("scr-settings");
 /* device setup + web flashing lives on its own page (needs Web Serial,
    i.e. a computer running Chrome/Edge - the page says so elsewhere) */
 $("set-setup").onclick = () => { location.href = "setup.html"; };
