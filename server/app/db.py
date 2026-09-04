@@ -101,6 +101,36 @@ CREATE TABLE IF NOT EXISTS waitlist (   -- public signups; read by hand
     email TEXT PRIMARY KEY,
     created TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS events (     -- analytics detail log (stats.py):
+    id INTEGER PRIMARY KEY,             -- things that happened, kept
+    ts TEXT NOT NULL DEFAULT (datetime('now')),  -- STATS_DAYS then purged
+    kind TEXT NOT NULL,                 -- 'msg.sent', 'device.boot', ...
+    dim TEXT NOT NULL DEFAULT '',       -- small enum facet (via, board, ...)
+    user_id INTEGER,                    -- actor, when there is one
+    device_id TEXT,
+    msg_id TEXT,
+    value REAL,                         -- kind-specific number (latency s)
+    detail TEXT                         -- short human text; never a secret
+);
+CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
+CREATE TABLE IF NOT EXISTS hourly (     -- analytics counters, flushed from
+    hour TEXT NOT NULL,                 -- memory every minute; STATS_DAYS
+    metric TEXT NOT NULL,               -- 'YYYY-MM-DD HH' UTC
+    dim TEXT NOT NULL DEFAULT '',
+    n INTEGER NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,      -- sum of values (avg = total/n)
+    lo REAL, hi REAL,
+    PRIMARY KEY (hour, metric, dim)
+);
+CREATE TABLE IF NOT EXISTS daily (      -- analytics rollup, kept forever:
+    day TEXT NOT NULL,                  -- bounded rows/day (no per-user or
+    metric TEXT NOT NULL,               -- per-device dims land here)
+    dim TEXT NOT NULL DEFAULT '',
+    n INTEGER NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,
+    lo REAL, hi REAL,
+    PRIMARY KEY (day, metric, dim)
+);
 """
 
 # additive columns for pre-existing databases; "duplicate column" is fine
@@ -119,6 +149,17 @@ MIGRATIONS = [
     # flash manifest only ever serve this model's artifacts.
     "ALTER TABLE devices ADD COLUMN board TEXT NOT NULL DEFAULT 'amoled-1.8'",
     "ALTER TABLE firmware ADD COLUMN board TEXT NOT NULL DEFAULT 'amoled-1.8'",
+    # device diagnostics, from the X-Pip-Diag header boxes send on every
+    # request (stats.device_diag): what it runs, how it is doing
+    "ALTER TABLE devices ADD COLUMN fw_version TEXT",
+    "ALTER TABLE devices ADD COLUMN rssi INTEGER",
+    "ALTER TABLE devices ADD COLUMN heap INTEGER",      # free internal RAM
+    "ALTER TABLE devices ADD COLUMN heap_max INTEGER",  # largest free block
+    "ALTER TABLE devices ADD COLUMN boot_at TEXT",      # now - uptime
+    "ALTER TABLE devices ADD COLUMN reset TEXT",        # last reset reason
+    # the server's current belief, so online/offline transitions can be
+    # logged as events (stats.presence_sweep)
+    "ALTER TABLE devices ADD COLUMN online INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -126,6 +167,11 @@ def init():
     os.makedirs(AUDIO_DIR, exist_ok=True)
     os.makedirs(FIRMWARE_DIR, exist_ok=True)
     with conn() as c:
+        # WAL: the analytics page reads a week of counters while requests
+        # keep writing; in rollback-journal mode every such read would
+        # block writers. Persistent, so once is enough; the -wal/-shm
+        # siblings appear next to the db (backup.sh's .backup copes).
+        c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
         for m in MIGRATIONS:
             try:
@@ -170,9 +216,13 @@ def init():
         c.execute("""UPDATE messages SET delivered_at=datetime('now')
                      WHERE delivered=1 AND delivered_at IS NULL""")
     # not world-readable: the db holds token/login-code hashes
+    for path in (DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"):
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
     try:
         os.chmod(DATA_DIR, 0o750)
-        os.chmod(DB_PATH, 0o600)
     except OSError:
         pass
 

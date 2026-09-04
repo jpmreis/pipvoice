@@ -12,6 +12,34 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.8] — 2026-09-04
+
+Admin analytics. The server now keeps a week of detail (an event log
+and hourly counters) and daily totals forever, and the boxes start
+telling the server how they are doing.
+
+### Added
+- Admin **Analytics** page: messages sent and delivered per day, delivery
+  latency (box vs phone), active users and boxes, push/email outcomes,
+  request counts and time-to-first-byte per route, error and rate-limit
+  counts, server restarts, storage trend, and a per-box health table
+  (online/offline, firmware version, Wi-Fi signal, free heap, uptime,
+  last reset reason, reboots, OTA downloads). A filterable event log
+  covers the last 7 days; ranges of 30/90 days and "all" read the daily
+  rollup. No external libraries: charts are inline SVG.
+- Firmware sends an `X-Pip-Diag` header (running version, board, RSSI,
+  free internal heap, largest free block, uptime, reset reason) on every
+  request it already makes — no new request, no new TLS connection.
+  Older servers ignore it; older boxes simply show no vitals.
+- Box online/offline transitions are logged (a box is offline after 40
+  quiet minutes; `PIP_OFFLINE_MIN`). Expect one `device.online` event
+  per awake box right after this deploy.
+- `PIP_STATS_DAYS` (default 7) sets how long detail is kept.
+
+### Changed
+- SQLite runs in WAL mode (the analytics reads must not block writers).
+  Backups via `sqlite3 .backup` are unaffected.
+
 ## [1.3.7] — 2026-09-04
 
 A server and PWA housekeeping release. The firmware is identical to

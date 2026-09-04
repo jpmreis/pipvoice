@@ -8,7 +8,7 @@ import os
 import subprocess
 import threading
 
-from . import db
+from . import db, stats
 
 log = logging.getLogger("mqtt")
 
@@ -40,6 +40,7 @@ def notify_user(user_id: int, payload: str = "{}") -> None:
                              if MQTT_PASS else None)
     except Exception as e:                      # broker down / not installed
         log.warning("notify skipped: %s", e)
+        stats.event("mqtt.fail", user_id=user_id, detail=type(e).__name__)
 
 
 def notify_all(payload: str = "{}", retain: bool = True) -> None:
@@ -61,6 +62,7 @@ def notify_all(payload: str = "{}", retain: bool = True) -> None:
                              if MQTT_PASS else None)
     except Exception as e:                      # broker down / not installed
         log.warning("notify_all skipped: %s", e)
+        stats.event("mqtt.fail", detail=type(e).__name__)
 
 
 def provision_device(device_id: str, mqtt_password: str) -> None:

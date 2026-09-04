@@ -68,4 +68,13 @@ variants) · `prompts/` (voice-control TTS clips) · `vapid_private.pem`
 - One global version: the active `firmware` row is what `/v1/version`
   and the `X-Pip-Version` header report; activation MQTT-notifies boxes
   (retained) and makes PWAs self-refresh.
+- Analytics (`stats.py`) has two tiers so cost stays flat as the family
+  grows: `stats.event()` for things that happen (rows in `events`, kept
+  `PIP_STATS_DAYS`), `stats.count()` for hot paths (in memory, flushed to
+  `hourly` every minute, same retention), and an hourly rollup into
+  `daily` (kept forever, bounded per day - per-user/per-device dims never
+  reach it). Never log a secret or personal datum (codes, tokens,
+  emails, IPs, raw paths); never call `event()` without `c=` from inside
+  an open `db.conn()` block. Boxes report vitals in an `X-Pip-Diag`
+  header on every request (`stats.parse_diag` is the contract).
 - Permissions are symmetric pairs; never write one-way rows.

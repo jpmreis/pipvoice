@@ -31,7 +31,7 @@ def send_login_code(user_id: int, display_name: str, code: str) -> bool:
             "Didn't ask for a code? Someone probably typed their email\n"
             "wrong - you can safely ignore this.\n")
     html = _render("code.html", first=first, code=code)
-    return notify.send_email(user_id, subject, text, html=html)
+    return notify.send_email(user_id, subject, text, html=html, tag="login")
 
 
 def send_install(user_id: int) -> bool:
@@ -54,4 +54,4 @@ def send_install(user_id: int) -> bool:
             f"({u['email']}) - it will send you a 6-digit code. {coda}")
     html = _render("install.html", first=first, email=u["email"],
                    local_auth=LOCAL_AUTH)
-    return notify.send_email(user_id, subject, text, html=html)
+    return notify.send_email(user_id, subject, text, html=html, tag="install")

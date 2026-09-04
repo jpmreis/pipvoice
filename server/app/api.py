@@ -15,7 +15,7 @@ from fastapi import (APIRouter, BackgroundTasks, Body, Form, HTTPException,
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from . import (boards, db, emails, mqtt, notify, presence, provision, push,
-               themes, vmsg, voice)
+               stats, themes, vmsg, voice)
 from .auth import (LOCAL_AUTH, AuthDep, Identity, client_ip, create_session,
                    issue_login_code, login_blocked, login_failed,
                    login_succeeded, redeem_login_code, token_hash,
@@ -140,8 +140,10 @@ def login_password(request: Request, email: str = Form(...),
     if not u or not u["password_hash"] \
             or not verify_password(password, u["password_hash"]):
         login_failed(rl_key)
+        stats.event("login.fail", dim="pwa", user_id=u["id"] if u else None)
         raise HTTPException(401, "wrong email or password")
     login_succeeded(rl_key)
+    stats.event("login.ok", dim="pwa", user_id=u["id"], detail="password")
     return _login_response(u)
 
 
@@ -151,9 +153,13 @@ def request_code(request: Request, email: str = Form(...)):
     the address matches a user - no account enumeration."""
     rl_key = f"code-req:{client_ip(request)}"
     if login_blocked(rl_key):
+        stats.event("login.blocked", dim="pwa")
         raise HTTPException(429, "too many attempts - try again later")
     login_failed(rl_key)             # every send counts toward the 5/15min cap
     u = user_by_email(email)
+    # logged with the user when the address matched, else anonymous: the
+    # response stays identical either way (no enumeration)
+    stats.event("login.code", dim="pwa", user_id=u["id"] if u else None)
     if u:
         emails.send_login_code(u["id"], u["display_name"],
                                issue_login_code(u["id"]))
@@ -166,12 +172,15 @@ def verify_code(request: Request, email: str = Form(...),
     addr = email.strip().lower()
     rl_key = f"code-ver:{client_ip(request)}:{addr}"
     if login_blocked(rl_key):
+        stats.event("login.blocked", dim="pwa")
         raise HTTPException(429, "too many attempts - try again later")
     u = user_by_email(addr)
     if not u or not redeem_login_code(u["id"], code):
         login_failed(rl_key)
+        stats.event("login.fail", dim="pwa", user_id=u["id"] if u else None)
         raise HTTPException(401, "wrong or expired code")
     login_succeeded(rl_key)
+    stats.event("login.ok", dim="pwa", user_id=u["id"], detail="code")
     return _login_response(u)
 
 
@@ -735,6 +744,11 @@ async def send_message(bg: BackgroundTasks,
         c.execute("""INSERT INTO messages (id,sender,recipient,duration)
                      VALUES (?,?,?,?)""",
                   (msg_id, ident.user_id, rcpt["id"], duration))
+    stats.event("msg.sent", dim="box" if ident.device_id else "phone",
+                user_id=ident.user_id, device_id=ident.device_id,
+                msg_id=msg_id, value=duration, detail=recipient_id)
+    stats.count("user.sent", ident.user_id)
+    stats.count("user.recv", rcpt["id"])
     # After the response, in a worker thread: notifying means a webpush per
     # subscription at up to 10 s each, and the sender has no reason to wait
     # on it. The audio and the row are already in place, so the promise a
@@ -843,7 +857,7 @@ def push_test(ident: Identity = AuthDep):
 
 @router.post("/messages/{msg_id}/ack")
 def ack(msg_id: str, ident: Identity = AuthDep):
-    _owned_message(ident, msg_id)
+    m = _owned_message(ident, msg_id)
     with db.conn() as c:
         # delivered_at stays at the FIRST ack: it starts the grace window
         # after which cleanup deletes the audio (and, for phone users, the
@@ -851,6 +865,16 @@ def ack(msg_id: str, ident: Identity = AuthDep):
         c.execute("""UPDATE messages SET delivered=1,
                        delivered_at=COALESCE(delivered_at, datetime('now'))
                      WHERE id=?""", (msg_id,))
+        if not m["delivered"]:
+            # first ack = delivery latency. A box acks once the audio is
+            # on its flash, a phone when playback starts - the dim keeps
+            # the two meanings apart on the analytics page
+            stats.event("msg.delivered",
+                        dim="box" if ident.device_id else "phone",
+                        user_id=ident.user_id, device_id=ident.device_id,
+                        msg_id=msg_id,
+                        value=max(0, int(time.time()) - _epoch(m["created"])),
+                        c=c)
     return {"ok": True}
 
 
@@ -872,6 +896,8 @@ def react(msg_id: str, ident: Identity = AuthDep, body: dict = Body(...)):
                        reaction=excluded.reaction,
                        created=datetime('now'), seen=0""",
                   (msg_id, ident.user_id, m["sender"], key))
+    stats.event("reaction", dim=key, user_id=ident.user_id,
+                device_id=ident.device_id, msg_id=msg_id)
     notify.reaction_created(m["sender"], ident.display_name,
                             ident.username, key, msg_id)
     return {"ok": True}
@@ -912,6 +938,9 @@ def delete(msg_id: str, ident: Identity = AuthDep):
     with db.conn() as c:
         c.execute("DELETE FROM messages WHERE id=?", (msg_id,))
     db.drop_audio(msg_id)
+    stats.event("msg.deleted", dim="box" if ident.device_id else "phone",
+                user_id=ident.user_id, device_id=ident.device_id,
+                msg_id=msg_id)
     return {"ok": True}
 
 
@@ -975,4 +1004,7 @@ def firmware_download(version: str, ident: Identity = AuthDep,
     path = db.firmware_path(version, resolved)
     if not os.path.exists(path):
         raise HTTPException(404, "no such firmware")
+    if ident.device_id:              # a box is updating itself (OTA)
+        stats.event("ota.download", dim=resolved, user_id=ident.user_id,
+                    device_id=ident.device_id, detail=version)
     return FileResponse(path, media_type="application/octet-stream")

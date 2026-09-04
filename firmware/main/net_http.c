@@ -2,10 +2,14 @@
 #include "board.h"      /* PIP_BOARD_NAME for theme rendition selection */
 #include "config.h"
 #include "cJSON.h"
+#include "net_wifi.h"   /* net_wifi_rssi for the diag header */
+#include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +19,26 @@
 static const char *TAG = "http";
 
 #define RESP_MAX (16 * 1024)
+
+/* X-Pip-Diag: the box's vitals, riding on every request it already
+ * makes (no extra request, no extra TLS session). The server folds it
+ * into the device row for the admin analytics page; an older server
+ * simply ignores the header. Keys are a firmware<->server contract
+ * (server/app/stats.py parse_diag): v firmware version, b board key,
+ * r wifi RSSI dBm (0 = unknown), h free internal heap, m largest free
+ * internal block, u uptime seconds, rr esp_reset_reason_t. */
+void net_http_add_diag(esp_http_client_handle_t c)
+{
+    char diag[128];
+    snprintf(diag, sizeof(diag), "v=%s;b=%s;r=%d;h=%u;m=%u;u=%u;rr=%d",
+             esp_app_get_description()->version, PIP_BOARD_NAME,
+             (int)net_wifi_rssi(),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             (unsigned)(esp_timer_get_time() / 1000000),
+             (int)esp_reset_reason());
+    esp_http_client_set_header(c, "X-Pip-Diag", diag);
+}
 
 static esp_http_client_handle_t client_new(const char *path_fmt, const char *arg,
                                            esp_http_client_method_t method)
@@ -36,6 +60,7 @@ static esp_http_client_handle_t client_new(const char *path_fmt, const char *arg
     char auth[96];
     snprintf(auth, sizeof(auth), "Bearer %s", g_cfg.auth_token);
     esp_http_client_set_header(c, "Authorization", auth);
+    net_http_add_diag(c);
     return c;
 }
 

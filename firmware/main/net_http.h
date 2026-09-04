@@ -3,7 +3,13 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "esp_http_client.h"
 #include "ui.h"
+
+/* attach the X-Pip-Diag vitals header (version, board, RSSI, heap,
+ * uptime, reset reason) to a request; every client built here gets it,
+ * ota.c adds it to the clients it builds itself */
+void net_http_add_diag(esp_http_client_handle_t c);
 
 typedef struct {
     char     id[UI_ID_LEN];

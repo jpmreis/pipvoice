@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
 
-from . import db
+from . import db, stats
 
 LOCAL_AUTH = db.env("LOCAL_AUTH", "") == "1"
 
@@ -147,15 +147,22 @@ class Identity:
     device_id: Optional[str]     # set when authenticated via device token
 
 
-def _identity_from_token(raw: str) -> Optional[Identity]:
+def _identity_from_token(raw: str, diag: Optional[str] = None
+                         ) -> Optional[Identity]:
+    """diag is the box's X-Pip-Diag header (stats.device_diag); it rides
+    the same write that stamps last_seen, so the diagnostics cost no
+    extra statement. Session tokens ignore it."""
     th = token_hash(raw)
     with db.conn() as c:
-        d = db.one(c, """SELECT d.id AS device_id, u.* FROM devices d
-                         JOIN users u ON u.id=d.user_id WHERE d.token_hash=?""",
-                   (th,))
+        d = db.one(c, """SELECT d.id AS device_id, d.board, d.fw_version,
+                                d.boot_at, d.reset, u.*
+                         FROM devices d JOIN users u ON u.id=d.user_id
+                         WHERE d.token_hash=?""", (th,))
         if d:
             c.execute("UPDATE devices SET last_seen=datetime('now') WHERE id=?",
                       (d["device_id"],))
+            if diag:
+                stats.device_diag(c, d["device_id"], d["board"], diag, d)
             return Identity(d["id"], d["username"], d["display_name"],
                             d["color"], bool(d["is_admin"]), d["device_id"])
         s = db.one(c, """SELECT s.expires, u.* FROM sessions s
@@ -174,19 +181,27 @@ def _identity_from_token(raw: str) -> Optional[Identity]:
     return None
 
 
+def _seen(ident: Identity) -> Identity:
+    """Activity counters for the analytics page (in-memory, stats.py)."""
+    stats.count("req.client", "box" if ident.device_id else "phone")
+    stats.count("user.active", ident.user_id)
+    return ident
+
+
 def require_auth(request: Request) -> Identity:
     hdr = request.headers.get("Authorization", "")
     if hdr.startswith("Bearer "):
-        ident = _identity_from_token(hdr[7:])
+        ident = _identity_from_token(hdr[7:],
+                                     request.headers.get("X-Pip-Diag"))
         if ident:
-            return ident
+            return _seen(ident)
     # PWA path: cookie set by /v1/auth/verify-code. Server-set cookies survive
     # Safari's 7-day script-storage purge and let <audio src> authenticate.
     sid = request.cookies.get("pip_session", "")
     if sid:
         ident = _identity_from_token(sid)
         if ident:
-            return ident
+            return _seen(ident)
     raise HTTPException(401, "invalid or missing token")
 
 
@@ -196,6 +211,7 @@ def require_admin_cookie(request: Request) -> Identity:
     if not ident or not ident.is_admin:
         raise HTTPException(status_code=303, detail="login required",
                             headers={"Location": "/admin/login"})
+    stats.count("user.active", ident.user_id)
     return ident
 
 

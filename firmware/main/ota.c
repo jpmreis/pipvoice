@@ -1,5 +1,6 @@
 #include "ota.h"
 #include "config.h"
+#include "net_http.h"
 #include "net_wifi.h"
 #include "cJSON.h"
 #include "esp_app_desc.h"
@@ -20,6 +21,7 @@ static esp_err_t ota_http_init_cb(esp_http_client_handle_t http)
 {
     char auth[96];
     snprintf(auth, sizeof(auth), "Bearer %s", g_cfg.auth_token);
+    net_http_add_diag(http);
     return esp_http_client_set_header(http, "Authorization", auth);
 }
 
@@ -36,6 +38,7 @@ static void check_once(void)
     char auth[96];
     snprintf(auth, sizeof(auth), "Bearer %s", g_cfg.auth_token);
     esp_http_client_set_header(c, "Authorization", auth);
+    net_http_add_diag(c);
 
     char body[512] = {0};
     if (esp_http_client_open(c, 0) == ESP_OK) {

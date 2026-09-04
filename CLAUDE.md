@@ -139,6 +139,15 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
   stays served for phones running an older cached `app.js`.
 - A user is either a device user or a phone user, never both — derived
   from `devices` rows, no schema flag.
+- Analytics (`server/app/stats.py`): `event()` for things that happen
+  (kept 7 d), `count()` for hot paths (in-memory → `hourly`, kept 7 d),
+  hourly rollup → `daily` (forever; per-user/per-device dims never reach
+  it — keep `PER_ENTITY` honest or the forever table grows with users).
+  Never log codes/tokens/emails/IPs/raw paths. Never call `event()`
+  without `c=` inside an open `db.conn()` block (nested connection waits
+  on the write lock). The firmware's `X-Pip-Diag` header keys
+  (`v b r h m u rr`, `net_http_add_diag`) are a contract with
+  `stats.parse_diag` — change both. DB is WAL mode since 1.3.8.
 - Auth modes: `PIP_LOCAL_AUTH=1` (self-host) enables scrypt local
   passwords and stops the boot-time blanking of `password_hash`;
   without it login is email-code only and hashes are blanked at boot.

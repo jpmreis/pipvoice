@@ -3,14 +3,15 @@ Users, devices (provision + NVS CSV), n-to-n permissions matrix, OTA."""
 import os
 import re
 import secrets
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from urllib.parse import quote
 
-from . import api, boards, db, emails, mqtt, provision, release, voice
+from . import api, boards, db, emails, mqtt, provision, release, stats, voice
 from .auth import (LOCAL_AUTH, AdminDep, Identity, client_ip, create_session,
                    hash_password, issue_login_code, login_blocked,
                    login_failed, login_succeeded, redeem_login_code,
@@ -51,6 +52,7 @@ def login_post(request: Request, action: str = Form(...),
                password: str = Form("")):
     rl_key = f"admin-code:{client_ip(request)}"
     if login_blocked(rl_key):
+        stats.event("login.blocked", dim="admin")
         return _page(request, "login.html", bootstrap=False, stage="email",
                      email="",
                      error="Too many attempts - try again in 15 minutes")
@@ -85,15 +87,21 @@ def login_post(request: Request, action: str = Form(...),
         if not u or not u["is_admin"] or not u["password_hash"] \
                 or not verify_password(password, u["password_hash"]):
             login_failed(rl_key)
+            stats.event("login.fail", dim="admin",
+                        user_id=u["id"] if u else None)
             return _page(request, "login.html", bootstrap=False,
                          stage="email", email=email,
                          error="Wrong email or password")
         login_succeeded(rl_key)
+        stats.event("login.ok", dim="admin", user_id=u["id"],
+                    detail="password")
         return _signed_in(u["id"])
 
     if action == "request":
         login_failed(rl_key)         # every code email counts toward the cap
         u = user_by_email(email)
+        stats.event("login.code", dim="admin",
+                    user_id=u["id"] if u and u["is_admin"] else None)
         if u and u["is_admin"]:
             emails.send_login_code(u["id"], u["display_name"],
                                    issue_login_code(u["id"]))
@@ -104,9 +112,11 @@ def login_post(request: Request, action: str = Form(...),
     u = user_by_email(email)         # action == "verify"
     if not u or not u["is_admin"] or not redeem_login_code(u["id"], code):
         login_failed(rl_key)
+        stats.event("login.fail", dim="admin", user_id=u["id"] if u else None)
         return _page(request, "login.html", bootstrap=False, stage="code",
                      email=email, error="Wrong or expired code")
     login_succeeded(rl_key)
+    stats.event("login.ok", dim="admin", user_id=u["id"], detail="code")
     return _signed_in(u["id"])
 
 
@@ -190,6 +200,263 @@ def dashboard(request: Request, ident: Identity = AdminDep):
                                 ORDER BY d.id""")
     return _page(request, "dashboard.html", stats=stats, devices=devices,
                  waiting=waiting, me=ident)
+
+
+# ---------- analytics ----------
+RANGES = {"7d": 7, "30d": 30, "90d": 90, "all": None}
+# event-log filter buttons: label -> kind prefix
+KIND_FILTERS = (("all", ""), ("messages", "msg."), ("reactions", "reaction"),
+                ("logins", "login."), ("push", "push."), ("email", "email."),
+                ("devices", "device."), ("ota", "ota."),
+                ("http", "http."), ("server", "server."))
+LOG_PAGE = 200
+
+
+def _by_day(rows) -> dict:
+    """series rows -> {day: {dim: [n, total, lo, hi]}} (hourly buckets fold
+    into their day, so every range charts one bar per day)."""
+    out: dict = {}
+    for r in rows:
+        day = r["b"][:10]
+        cur = out.setdefault(day, {}).setdefault(r["dim"], [0, 0.0, None, None])
+        cur[0] += r["n"]
+        cur[1] += r["total"] or 0
+        if r["lo"] is not None:
+            cur[2] = r["lo"] if cur[2] is None else min(cur[2], r["lo"])
+        if r["hi"] is not None:
+            cur[3] = r["hi"] if cur[3] is None else max(cur[3], r["hi"])
+    return out
+
+
+def _chart(days: list, by_day: dict, dims: list, mode: str = "n") -> dict:
+    """Chart payload for the template's JS: one series per dim.
+    mode n = counts, avg = total/n, hi = max."""
+    series = []
+    for d in dims:
+        vals = []
+        for day in days:
+            cur = by_day.get(day, {}).get(d)
+            if not cur or not cur[0]:
+                vals.append(0)
+            elif mode == "avg":
+                vals.append(round(cur[1] / cur[0], 1))
+            elif mode == "hi":
+                vals.append(round(cur[3] or 0, 1))
+            else:
+                vals.append(cur[0])
+        series.append({"name": d or "total", "values": vals})
+    return {"labels": [d[5:] for d in days], "series": series}
+
+
+def _n(tot: dict, metric: str, dim=None) -> int:
+    """Sum of n over a metric (or one dim) from stats.totals()."""
+    dims = tot.get(metric, {})
+    if dim is not None:
+        return int(dims.get(dim, {}).get("n", 0) or 0)
+    return int(sum((v["n"] or 0) for v in dims.values()))
+
+
+@router.get("/analytics", response_class=HTMLResponse)
+def analytics_page(request: Request, ident: Identity = AdminDep,
+                   rng: str = Query("7d", alias="range"), kind: str = "",
+                   user: str = "", device: str = "", before: str = ""):
+    """User trends, server health, device health (stats.py). The 7-day
+    view reads the hourly counters; longer ranges read the daily rollup.
+    Per-user and per-device detail is always the last 7 days - that is
+    the only place it exists."""
+    if rng not in RANGES:
+        rng = "7d"
+    ndays = RANGES[rng]
+    now = stats.utcnow()
+    table = "hourly" if rng == "7d" else "daily"
+    if ndays:
+        start = now - timedelta(days=ndays - 1)
+        since = start.strftime("%Y-%m-%d %H" if table == "hourly"
+                               else "%Y-%m-%d")
+        days = [(start + timedelta(days=i)).strftime("%Y-%m-%d")
+                for i in range(ndays)]
+    else:
+        since = "0000"
+        days = None
+    week = (now - timedelta(days=6)).strftime("%Y-%m-%d %H")
+    with db.conn() as c:
+        tot = stats.totals(c, table, since)
+        wk = tot if table == "hourly" else stats.totals(c, "hourly", week)
+        if days is None:                     # "all": every day on record
+            days = [r["d"] for r in db.all_(
+                c, "SELECT DISTINCT day AS d FROM daily ORDER BY day")] or \
+                [now.strftime("%Y-%m-%d")]
+        sent = _by_day(stats.series(c, table, "msg.sent", since))
+        lat = _by_day(stats.series(c, table, "msg.delivered", since))
+        req = _by_day(stats.series(c, table, "req", since))
+        errs = _by_day(stats.series(c, table, "req.status", since))
+        storage = _by_day(stats.series(c, "daily", "db.bytes",
+                                       since if table == "daily" else
+                                       since[:10]))
+        audio = _by_day(stats.series(c, "daily", "audio.bytes",
+                                     since if table == "daily" else
+                                     since[:10]))
+        # active users: distinct ids this week, or the daily count's
+        # average when the range no longer has per-user data
+        if table == "hourly":
+            active_users = len(tot.get("user.active", {}))
+            active_devices = len(tot.get("diag.rssi", {}))
+        else:
+            au = [r["n"] for r in stats.series(c, "daily", "active.users",
+                                               since)]
+            ad = [r["n"] for r in stats.series(c, "daily", "active.devices",
+                                               since)]
+            active_users = round(sum(au) / len(au), 1) if au else 0
+            active_devices = round(sum(ad) / len(ad), 1) if ad else 0
+        groups = sorted(tot.get("req", {}).items(),
+                        key=lambda kv: -(kv[1]["n"] or 0))
+        latency_rows = [{"group": g, "n": v["n"],
+                         "avg": round((v["total"] or 0) / v["n"]) if v["n"] else 0,
+                         "hi": round(v["hi"] or 0)} for g, v in groups]
+        # per-user table: last 7 days of hourly, capped
+        names = {r["id"]: r for r in db.all_(
+            c, "SELECT id, username, display_name, color FROM users")}
+        per_user = []
+        for uid_s, v in wk.get("user.active", {}).items():
+            uid = int(uid_s)
+            u = names.get(uid)
+            if not u:
+                continue
+            per_user.append({
+                "name": u["display_name"], "color": u["color"],
+                "active_h": v["n"],
+                "sent": int(wk.get("user.sent", {}).get(uid_s, {}).get("n", 0) or 0),
+                "recv": int(wk.get("user.recv", {}).get(uid_s, {}).get("n", 0) or 0),
+                "id": uid})
+        per_user.sort(key=lambda r: (-r["sent"], -r["active_h"]))
+        per_user = per_user[:50]
+        # devices: current row + 7-day diag aggregates + 7-day event counts
+        active_fw = {r["board"]: r["version"] for r in db.all_(
+            c, "SELECT board, version FROM firmware WHERE active=1")}
+        dev_events = {}
+        for r in db.all_(c, """SELECT device_id, kind, COUNT(*) n FROM events
+                               WHERE device_id IS NOT NULL
+                               GROUP BY device_id, kind"""):
+            dev_events.setdefault(r["device_id"], {})[r["kind"]] = r["n"]
+        devices = []
+        for d in db.all_(c, """SELECT d.*, u.display_name FROM devices d
+                               JOIN users u ON u.id=d.user_id ORDER BY d.id"""):
+            rs = wk.get("diag.rssi", {}).get(d["id"])
+            hp = wk.get("diag.heap", {}).get(d["id"])
+            ev = dev_events.get(d["id"], {})
+            uptime = None
+            if d["boot_at"]:
+                try:
+                    uptime = (now.replace(tzinfo=None)
+                              - datetime.fromisoformat(d["boot_at"])
+                              ).total_seconds() / 3600
+                except ValueError:
+                    pass
+            devices.append({
+                "id": d["id"], "owner": d["display_name"],
+                "board": boards.BOARDS.get(d["board"], {}).get("label",
+                                                               d["board"]),
+                "online": bool(d["online"]), "last_seen": d["last_seen"],
+                "fw": d["fw_version"],
+                "fw_stale": bool(d["fw_version"] and active_fw.get(d["board"])
+                                 and d["fw_version"] != active_fw[d["board"]]),
+                "rssi": d["rssi"],
+                "rssi_avg": round(rs["total"] / rs["n"]) if rs and rs["n"] else None,
+                "rssi_lo": rs["lo"] if rs else None,
+                "heap": d["heap"], "heap_max": d["heap_max"],
+                "heap_lo": hp["lo"] if hp else None,
+                "uptime": _age(uptime) if uptime is not None else None,
+                "reset": d["reset"],
+                "boots": ev.get("device.boot", 0),
+                "offline": ev.get("device.offline", 0),
+                "ota": ev.get("ota.download", 0),
+            })
+        # per-device drill-down sparklines (7 days, hourly)
+        spark = None
+        if device:
+            spark = {
+                "rssi": [[r["b"][5:], round(r["total"] / r["n"], 1)]
+                         for r in stats.series(c, "hourly", "diag.rssi", week,
+                                               device) if r["n"]],
+                "heap": [[r["b"][5:], round(r["total"] / r["n"] / 1024, 1)]
+                         for r in stats.series(c, "hourly", "diag.heap", week,
+                                               device) if r["n"]],
+            }
+        # event log
+        where, args = [], []
+        if kind:
+            where.append("e.kind LIKE ?")
+            args.append(kind + "%")
+        if user:
+            where.append("e.user_id=?")
+            args.append(int(user) if user.isdigit() else -1)
+        if device:
+            where.append("e.device_id=?")
+            args.append(device)
+        if before.isdigit():
+            where.append("e.id < ?")
+            args.append(int(before))
+        sql = """SELECT e.*, u.display_name FROM events e
+                 LEFT JOIN users u ON u.id=e.user_id"""
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += f" ORDER BY e.id DESC LIMIT {LOG_PAGE + 1}"
+        rows = db.all_(c, sql, args)
+        more = len(rows) > LOG_PAGE
+        log_rows = [dict(r) for r in rows[:LOG_PAGE]]
+        for r in log_rows:                    # 7.0 -> 7 in the log column
+            v = r["value"]
+            if isinstance(v, float) and v.is_integer():
+                r["value"] = int(v)
+        undelivered = db.one(c, "SELECT COUNT(*) n FROM messages "
+                                "WHERE delivered=0")["n"]
+
+    delivered = tot.get("msg.delivered", {})
+    lat_summary = []
+    for via in ("box", "phone"):
+        v = delivered.get(via)
+        if v and v["n"]:
+            lat_summary.append({"via": via, "n": v["n"],
+                                "avg": round(v["total"] / v["n"]),
+                                "hi": round(v["hi"] or 0)})
+    tiles = {
+        "sent": _n(tot, "msg.sent"), "delivered": _n(tot, "msg.delivered"),
+        "reactions": _n(tot, "reaction"), "logins": _n(tot, "login.ok"),
+        "active_users": active_users, "active_devices": active_devices,
+        "requests": _n(tot, "req"), "errors_5xx": _n(tot, "req.status", "5xx"),
+        "errors_4xx": _n(tot, "req.status", "4xx"),
+        "restarts": _n(tot, "server.start"),
+        "ratelimit": _n(tot, "http.ratelimit"),
+        "push_ok": _n(tot, "push.ok"), "push_fail": _n(tot, "push.fail"),
+        "push_pruned": _n(tot, "push.pruned"),
+        "email_ok": _n(tot, "email.ok"), "email_fail": _n(tot, "email.fail"),
+        "reminders": _n(tot, "reminder"), "undelivered": undelivered,
+        "expired": _n(tot, "msg.expired"),
+    }
+    req_dims = [g for g, _ in groups][:8]
+    charts = {
+        "sent": _chart(days, sent, ["box", "phone"]),
+        "latency": _chart(days, lat, ["box", "phone"], mode="avg"),
+        "req": _chart(days, req, req_dims),
+        "errors": _chart(days, errs, ["4xx", "5xx"]),
+        "storage": {"labels": [d[5:] for d in days],
+                    "series": [
+                        {"name": "db MB", "values": [
+                            round((storage.get(d, {}).get("", [0])[0] or 0)
+                                  / 1048576, 2) for d in days]},
+                        {"name": "audio MB", "values": [
+                            round((audio.get(d, {}).get("", [0])[0] or 0)
+                                  / 1048576, 2) for d in days]}]},
+    }
+    return _page(request, "analytics.html", me=ident, range=rng,
+                 ranges=list(RANGES), tiles=tiles, charts=charts,
+                 latency=latency_rows, lat_summary=lat_summary,
+                 per_user=per_user, devices=devices, spark=spark,
+                 log=log_rows, more=more, kind=kind, user=user,
+                 device=device, kind_filters=KIND_FILTERS,
+                 last_id=log_rows[-1]["id"] if log_rows else 0,
+                 stats_days=stats.DAYS, offline_min=stats.OFFLINE_MIN,
+                 now=now.strftime("%Y-%m-%d %H:%M"))
 
 
 # ---------- users ----------
@@ -429,6 +696,8 @@ async def firmware_upload(ident: Identity = AdminDep,
                   (version, notes, 1 if activate else 0, board))
     if activate:
         api.version_bumped()
+        stats.event("firmware.activate", dim=board, user_id=ident.user_id,
+                    detail=version)
         mqtt.notify_all('{"event":"firmware","version":"%s"}' % version)
     return RedirectResponse("/admin/firmware", status_code=303)
 
@@ -445,5 +714,7 @@ def firmware_activate(board: str, version: str, ident: Identity = AdminDep):
         c.execute("""UPDATE firmware SET active=1
                      WHERE version=? AND board=?""", (version, board))
     api.version_bumped()
+    stats.event("firmware.activate", dim=board, user_id=ident.user_id,
+                detail=version)
     mqtt.notify_all('{"event":"firmware","version":"%s"}' % version)
     return RedirectResponse("/admin/firmware", status_code=303)

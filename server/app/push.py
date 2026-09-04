@@ -8,7 +8,7 @@ to email. Transient failures (429/5xx/network) keep the row.
 import json
 import logging
 
-from . import db
+from . import db, stats
 
 log = logging.getLogger("push")
 
@@ -101,14 +101,21 @@ def send_to_user(user_id: int, payload: dict) -> int:
             with db.conn() as c:
                 c.execute("UPDATE push_subs SET last_ok=datetime('now') "
                           "WHERE endpoint=?", (s["endpoint"],))
+            stats.event("push.ok", user_id=user_id,
+                        msg_id=payload.get("msg_id") or None)
         except WebPushException as e:
             code = e.response.status_code if e.response is not None else None
             if code in (404, 410):
                 drop_subscription(s["endpoint"])
                 log.info("pruned dead subscription for user %d (%s)",
                          user_id, code)
+                stats.event("push.pruned", user_id=user_id, detail=str(code))
             else:
                 log.warning("push failed for user %d: %s", user_id, e)
+                stats.event("push.fail", user_id=user_id,
+                            detail=f"{code or 'no response'}")
         except Exception as e:                     # DNS/timeout/etc: transient
             log.warning("push error for user %d: %s", user_id, e)
+            stats.event("push.fail", user_id=user_id,
+                        detail=type(e).__name__)
     return accepted

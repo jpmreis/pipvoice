@@ -16,7 +16,7 @@ import logging
 import os
 import time
 
-from . import db, notify
+from . import db, notify, stats
 
 log = logging.getLogger("cleanup")
 RETENTION_DAYS = int(db.env("RETENTION_DAYS", "30"))
@@ -43,13 +43,16 @@ def cleanup_once(retention_days: int = RETENTION_DAYS,
                 trimmed += 1
         # row age-out: undelivered messages give up, and audio-less
         # device-recipient rows (kept above for the box's inbox) expire
-        old = db.all_(c, """SELECT id FROM messages
+        old = db.all_(c, """SELECT id, delivered FROM messages
                             WHERE created < datetime('now', ?)""",
                       (f"-{retention_days} days",))
+        expired = []
         for r in old:
             c.execute("DELETE FROM messages WHERE id=?", (r["id"],))
             db.drop_audio(r["id"])
             purged += 1
+            if not r["delivered"]:       # never reached anyone: worth a log line
+                expired.append(r["id"])
         # seen reactions age out like messages; unseen ones wait for the
         # sender however long it takes (tiny rows, no audio attached)
         c.execute("""DELETE FROM reactions WHERE seen=1
@@ -73,9 +76,13 @@ def cleanup_once(retention_days: int = RETENTION_DAYS,
         if ext and fn[:-len(ext)] not in ids:
             os.remove(path)
             swept += 1
+    for mid in expired:                  # after the connection closed
+        stats.event("msg.expired", msg_id=mid)
     if purged or trimmed or swept:
         log.info("purged %d messages, trimmed %d delivered audio files, "
                  "swept %d orphan files", purged, trimmed, swept)
+        stats.event("cleanup", detail=f"purged {purged}, trimmed {trimmed}, "
+                                      f"swept {swept}")
     return {"purged": purged, "trimmed": trimmed, "swept": swept}
 
 
@@ -95,8 +102,10 @@ def remind_once(remind_hours: int = REMIND_HOURS) -> int:
                 r["recipient"],
                 f"You have an unheard Pip message from {r['sender']}",
                 f"{r['sender']} sent you a voice message a while ago and it "
-                f"hasn't been played yet.\n\nListen here: {notify.app_url()}\n"):
+                f"hasn't been played yet.\n\nListen here: {notify.app_url()}\n",
+                tag="reminder"):
             sent += 1
+            stats.event("reminder", user_id=r["recipient"], msg_id=r["id"])
         with db.conn() as c:   # mark even on failure: never spam retries
             c.execute("UPDATE messages SET reminded=1 WHERE id=?", (r["id"],))
     if sent:

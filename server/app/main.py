@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import threading
+import time
 
 import functools
 
@@ -12,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 import asyncio
 
-from . import api, db, mqtt, presence, themes, voice
+from . import api, db, mqtt, presence, stats, themes, voice
 from .api import router as api_router
 from .admin import router as admin_router
 from .cleanup import cleanup_loop
@@ -47,9 +48,33 @@ _APP_CACHE = (("/app/fonts/", "public, max-age=31536000, immutable"),
 async def _stamp_version(request, call_next):
     # every /v1 response carries the global version, so the PWA notices an
     # update on its next API interaction instead of waiting out the poll -
-    # the browser-side stand-in for the devices' MQTT firmware notify
-    resp = await call_next(request)
+    # the browser-side stand-in for the devices' MQTT firmware notify.
+    # Also the one per-request analytics hook (stats.py): request counts
+    # and time-to-headers per route group, and 5xx/429 as events. The
+    # detail never carries the raw path (setup URLs hold one-shot nonces).
     path = request.url.path
+    group = stats.route_group(path)
+    t0 = time.monotonic()
+    try:
+        resp = await call_next(request)
+    except Exception:
+        stats.count("req", group, value=(time.monotonic() - t0) * 1000)
+        stats.count("req.status", "5xx")
+        stats.event("http.error", dim=group,
+                    detail=f"{request.method} {group} exception")
+        raise
+    if path != "/healthz":                 # deploy probe, pure noise
+        stats.count("req", group, value=(time.monotonic() - t0) * 1000)
+        if resp.status_code >= 500:
+            stats.count("req.status", "5xx")
+            stats.event("http.error", dim=group,
+                        detail=f"{request.method} {group} {resp.status_code}")
+        elif resp.status_code == 429:
+            stats.count("req.status", "4xx")
+            stats.event("http.ratelimit", dim=group,
+                        detail=f"{request.method} {group}")
+        elif resp.status_code >= 400:
+            stats.count("req.status", "4xx")
     if path.startswith("/v1/"):
         resp.headers["X-Pip-Version"] = api.global_version()
     elif path.startswith("/app"):
@@ -69,7 +94,9 @@ app.mount("/app", StaticFiles(
 
 @app.on_event("startup")
 async def _start_cleanup():
+    stats.event("server.start", detail=api.global_version())
     asyncio.create_task(cleanup_loop())
+    asyncio.create_task(stats.stats_loop())
     presence.start_subscriber()
     # voice-control prompt clips: re-render whatever a deploy changed
     # (phrase text, TTS voice) for every voice-enabled box. Runs in its
@@ -84,6 +111,11 @@ async def _start_cleanup():
         mqtt._reload_broker()
     except Exception:
         pass
+
+
+@app.on_event("shutdown")
+async def _stop_stats():
+    stats.flush()          # a deploy restart loses nothing but the tick
 
 
 @functools.lru_cache(maxsize=None)

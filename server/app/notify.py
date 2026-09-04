@@ -19,7 +19,7 @@ import smtplib
 from datetime import datetime, timezone
 from email.message import EmailMessage
 
-from . import db, mqtt, push, vmsg
+from . import db, mqtt, push, stats, vmsg
 
 log = logging.getLogger("notify")
 
@@ -102,7 +102,7 @@ def message_created(recipient_id: int, msg_id: str, sender_name: str) -> None:
         send_email(recipient_id,
                    f"{sender_name} sent you a voice message on Pip",
                    f"{sender_name} sent you a voice message.\n\n"
-                   f"Listen here: {app_url()}\n")
+                   f"Listen here: {app_url()}\n", tag="new")
 
 
 # wire keys -> display glyphs, for push notification bodies
@@ -131,8 +131,10 @@ def reaction_created(target_id: int, reactor_name: str,
 
 
 def send_email(user_id: int, subject: str, body: str,
-               html: str | None = None) -> bool:
-    """Best-effort; returns True only when the mail was handed to SMTP."""
+               html: str | None = None, tag: str = "other") -> bool:
+    """Best-effort; returns True only when the mail was handed to SMTP.
+    tag names the kind of mail for analytics (login/install/new/reminder)
+    - the subject and address are never logged."""
     if not SMTP_HOST:
         log.warning("email skipped (PIP_SMTP_HOST unset)")
         return False
@@ -155,7 +157,10 @@ def send_email(user_id: int, subject: str, body: str,
             if SMTP_USER:
                 s.login(SMTP_USER, SMTP_PASS)
             s.send_message(msg)
+        stats.event("email.ok", dim=tag, user_id=user_id)
         return True
     except Exception as e:
         log.warning("email to user %d failed: %s", user_id, e)
+        stats.event("email.fail", dim=tag, user_id=user_id,
+                    detail=type(e).__name__)
         return False

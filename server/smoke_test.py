@@ -178,6 +178,97 @@ ok(c.post(f"/v1/messages/{mid}/ack", headers=H_G).status_code == 200, "ack")
 ok(c.delete(f"/v1/messages/{mid}", headers=H_G).status_code == 200, "delete")
 ok(c.get("/v1/inbox", headers=H_G).json() == [], "inbox empty after delete")
 
+# --- analytics (stats.py): events, diag header, counters, rollup, page ---
+from app import stats as _stats, db as _adb
+with _adb.conn() as cc:
+    kinds = {(r["kind"], r["dim"]) for r in _adb.all_(
+        cc, "SELECT kind, dim FROM events WHERE msg_id=?", (mid,))}
+    dl = _adb.one(cc, "SELECT value FROM events WHERE kind='msg.delivered' "
+                      "AND msg_id=?", (mid,))
+ok(kinds == {("msg.sent", "box"), ("msg.delivered", "box"),
+             ("msg.deleted", "box")}, f"message lifecycle logged: {kinds}")
+ok(dl is not None and dl["value"] is not None and dl["value"] >= 0,
+   "delivery latency recorded on first ack")
+ok(_stats.route_group("/v1/messages/abc/audio.m4a") == "audio"
+   and _stats.route_group("/v1/inbox") == "inbox"
+   and _stats.route_group("/admin/analytics") == "admin"
+   and _stats.route_group("/v1/setup/nvs/xyz.bin") == "setup",
+   "route groups classify paths")
+diag = {**H_G, "X-Pip-Diag": "v=9.9.9;b=amoled-1.8;r=-50;h=90000;m=30000;"
+                             "u=5000;rr=1"}
+ok(c.get("/v1/inbox", headers=diag).status_code == 200, "diag header accepted")
+with _adb.conn() as cc:
+    drow = _adb.one(cc, "SELECT * FROM devices WHERE id='pip-grandma-01'")
+    fw_ev = _adb.one(cc, "SELECT detail FROM events WHERE kind='device.fw' "
+                         "AND device_id='pip-grandma-01'")
+ok(drow["fw_version"] == "9.9.9" and drow["rssi"] == -50
+   and drow["heap"] == 90000 and drow["heap_max"] == 30000
+   and drow["reset"] == "poweron" and drow["boot_at"], "diag stored on device")
+ok(fw_ev and fw_ev["detail"] == "? -> 9.9.9", "first firmware report logged")
+c.get("/v1/inbox", headers={**H_G, "X-Pip-Diag": "v=9.9.9;u=10;rr=4"})
+with _adb.conn() as cc:
+    boot = _adb.one(cc, "SELECT detail FROM events WHERE kind='device.boot' "
+                        "AND device_id='pip-grandma-01'")
+    fw_n = _adb.one(cc, "SELECT COUNT(*) n FROM events WHERE kind='device.fw'"
+                        " AND device_id='pip-grandma-01'")["n"]
+ok(boot and boot["detail"] == "panic", "reboot detected from uptime drop")
+ok(fw_n == 1, "unchanged firmware version is not re-logged")
+c.get("/v1/inbox", headers={**H_G, "X-Pip-Diag": "garbage;;r=x;v="})
+ok(True, "malformed diag header ignored")
+ok(c.get("/v1/nope", headers=H_G).status_code == 404, "404 for the 4xx counter")
+ok(_stats.flush() > 0, "counters flushed to hourly")
+with _adb.conn() as cc:
+    hr = {r["metric"]: r for r in _adb.all_(
+        cc, "SELECT metric, dim, n, total, lo, hi FROM hourly "
+            "WHERE metric IN ('req','req.status','diag.rssi','req.client') "
+            "AND dim IN ('inbox','4xx','pip-grandma-01','box')")}
+ok(hr.get("req") and hr["req"]["n"] >= 3 and hr["req"]["hi"] is not None,
+   "request counter has latency")
+ok(hr.get("req.status") and hr["req.status"]["n"] >= 1, "4xx counted")
+ok(hr.get("diag.rssi") and hr["diag.rssi"]["lo"] == -50, "rssi aggregated")
+ok(hr.get("req.client") and hr["req.client"]["n"] >= 3, "box requests counted")
+with _adb.conn() as cc:
+    cc.execute("""INSERT INTO events (ts, kind) VALUES
+                  (datetime('now','-8 days'), 'msg.sent')""")
+    cc.execute("""INSERT INTO hourly (hour, metric, n) VALUES
+                  (strftime('%Y-%m-%d %H', 'now', '-8 days'), 'req', 5)""")
+res = _stats.rollup_once()
+ok(res["rolled"] > 0 and res["purged"] == 2, f"rollup + purge: {res}")
+with _adb.conn() as cc:
+    today = _stats.utcnow().strftime("%Y-%m-%d")
+    dl = {r["metric"]: r["n"] for r in _adb.all_(
+        cc, "SELECT metric, n FROM daily WHERE day=?", (today,))}
+    leaked = _adb.one(cc, "SELECT COUNT(*) n FROM daily WHERE metric "
+                          "IN ('user.active','diag.rssi','user.sent')")["n"]
+ok(dl.get("msg.sent", 0) >= 1 and dl.get("active.users", 0) >= 1
+   and dl.get("active.devices", 0) >= 1 and dl.get("users", 0) >= 3
+   and "db.bytes" in dl, f"daily rollup rows: {sorted(dl)}")
+ok(leaked == 0, "per-user/device dims never reach the daily table")
+ok(_stats.presence_sweep() >= 1, "first sweep marks awake boxes online")
+with _adb.conn() as cc:
+    cc.execute("""UPDATE devices SET last_seen=datetime('now','-2 hours')
+                  WHERE id='pip-grandma-01'""")
+ok(_stats.presence_sweep() == 1, "quiet box flips to offline")
+with _adb.conn() as cc:
+    off = _adb.one(cc, "SELECT value FROM events WHERE kind='device.offline' "
+                       "AND device_id='pip-grandma-01'")
+    on = _adb.one(cc, "SELECT online FROM devices WHERE id='pip-grandma-01'")
+ok(off and off["value"] >= 119 and on["online"] == 0,
+   "offline event carries the quiet minutes")
+ok(_stats.presence_sweep() == 0, "sweep is idempotent")
+for q in ("", "?range=30d", "?range=all", "?range=bogus",
+          "?device=pip-grandma-01", "?kind=msg.&user=3"):
+    r = c.get("/admin/analytics" + q)
+    ok(r.status_code == 200 and "pip-grandma-01" in r.text,
+       f"analytics page renders {q or 'default'}")
+r = c.get("/admin/analytics?kind=msg.")
+ok("msg.sent" in r.text and "device.fw" not in r.text, "event log kind filter")
+r = c.get("/admin/analytics?device=pip-grandma-01")
+ok("device.boot" in r.text and "msg.sent" not in r.text
+   and "data-spark" in r.text, "device drill-down: its events + sparklines")
+r = c.get("/admin/analytics?range=30d&device=pip-grandma-01")
+ok("? -&gt; 9.9.9" in r.text, "device.fw detail renders")
+
 # --- wrong-owner access is denied ---
 r = c.get(f"/v1/messages/{mid}/audio", headers=H_E)
 ok(r.status_code == 404, "cross-user message access denied")
@@ -249,6 +340,8 @@ ok(bare.get("/v1/inbox").status_code == 401, "no token -> 401")
 anon = TestClient(app, follow_redirects=False)
 ok(anon.get("/admin/users").status_code == 303,
    "admin pages redirect unauthenticated to login")
+ok(anon.get("/admin/analytics").status_code == 303,
+   "analytics requires admin login")
 # --- device revocation ---
 r = c.post("/admin/devices/pip-ella-01/delete")
 ok(r.status_code == 303, "device revoked via admin")
