@@ -47,13 +47,25 @@ def _get(url: str, cap: int):
         return data, r.geturl()
 
 
+def _summary(notes: str, cap: int = 300) -> str:
+    """First prose paragraph of a release's markdown notes, collapsed to
+    one line - what fits in the admin table's Notes column. Headings are
+    skipped; the full text stays on the GitHub Release."""
+    for para in re.split(r"\n\s*\n", notes.strip()):
+        line = " ".join(para.split())
+        if line and not line.startswith("#"):
+            return line[:cap] + ("…" if len(line) > cap else "")
+    return ""
+
+
 def _dest_path(version: str, kind: str, board: str) -> str:
     if kind == "app":
         return db.firmware_path(version, board)
     return provision.asset_path(version, kind, board)  # bootloader/parttable
 
 
-def _install_build(version: str, board: str, build: dict) -> bool:
+def _install_build(version: str, board: str, build: dict,
+                   notes: str) -> bool:
     """Download + verify one board's parts; True when work was done."""
     parts = build.get("parts", [])
     kinds = {p.get("kind") for p in parts}
@@ -68,6 +80,12 @@ def _install_build(version: str, board: str, build: dict) -> bool:
     have_files = all(os.path.exists(_dest_path(version, k, board))
                      for k in ("app", "bootloader", "parttable"))
     if have_row and have_files:
+        if notes:                # backfill rows ingested before manifests
+            with db.conn() as c:  # carried notes; never clobber real ones
+                c.execute("""UPDATE firmware SET notes=?
+                             WHERE version=? AND board=?
+                               AND notes IN ('', 'GitHub release')""",
+                          (notes, version, board))
         return False
 
     for p in parts:
@@ -96,7 +114,7 @@ def _install_build(version: str, board: str, build: dict) -> bool:
     with db.conn() as c:                 # inactive; admin activates when ready
         c.execute("""INSERT OR IGNORE INTO firmware
                      (version, notes, active, board) VALUES (?,?,0,?)""",
-                  (version, "GitHub release", board))
+                  (version, notes or "GitHub release", board))
     return True
 
 
@@ -126,9 +144,10 @@ def install() -> str:
     if not builds:
         raise ValueError(f"manifest has no {CHIP_FAMILY} builds")
 
+    notes = _summary(str(m.get("notes", "")))
     os.makedirs(db.FIRMWARE_DIR, exist_ok=True)
     installed = [k for k, b in sorted(builds.items())
-                 if _install_build(version, k, b)]
+                 if _install_build(version, k, b, notes)]
     if not installed:
         return f"already installed: {version} ({', '.join(sorted(builds))})"
     return (f"installed {version} for {', '.join(installed)} - "

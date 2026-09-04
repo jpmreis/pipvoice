@@ -12,7 +12,8 @@ stable release names, writes ONE manifest.json - an ESP Web
 Tools-compatible superset: one `builds[]` entry per board, each part
 carrying `kind` and `sha256`, which the Pip server verifies when it
 ingests a release (server/app/release.py) - and extracts the version's
-CHANGELOG section into RELEASE_NOTES.md for the GitHub Release body.
+CHANGELOG section into RELEASE_NOTES.md for the GitHub Release body
+(and into the manifest's `notes`, shown on the server's admin page).
 
 Asset naming: the amoled-1.8 keeps the legacy names (pip-<ver>.bin,
 pip-<ver>.<kind>.bin) so pre-multi-SKU servers keep working; other
@@ -108,22 +109,23 @@ def main() -> int:
             print(str(e), file=sys.stderr)
             return 1
 
+    notes = ""
+    if a.changelog:
+        with open(a.changelog) as f:
+            notes = changelog_section(f.read(), a.version)
+        if not notes:
+            print(f"warning: no CHANGELOG section for {a.version}",
+                  file=sys.stderr)
+
     manifest = {"name": "Pip", "version": a.version, "builds": builds}
+    if notes:                    # servers surface these on the admin page
+        manifest["notes"] = notes
     with open(os.path.join(a.out, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")
 
-    notes = f"Pip v{a.version}"
-    if a.changelog:
-        with open(a.changelog) as f:
-            section = changelog_section(f.read(), a.version)
-        if section:
-            notes = section
-        else:
-            print(f"warning: no CHANGELOG section for {a.version}",
-                  file=sys.stderr)
     with open(os.path.join(a.out, "RELEASE_NOTES.md"), "w") as f:
-        f.write(notes + "\n")
+        f.write((notes or f"Pip v{a.version}") + "\n")
 
     print(f"packaged {len(builds)} board build(s) for v{a.version} "
           f"into {a.out}/")

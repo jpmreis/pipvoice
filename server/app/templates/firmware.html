@@ -1,18 +1,25 @@
 {% extends "base.html" %}{% block content %}
 <h1>Firmware / OTA</h1>
 {% if msg %}<div class="card"><p>{{ msg }}</p></div>{% endif %}
+<style>td.notes{color:var(--dim);font-size:13px;max-width:300px}</style>
 <div class="card"><table>
-<tr><th>Version</th><th>Model</th><th>Notes</th><th>Uploaded</th><th>Flash bundle</th><th>Status</th><th></th></tr>
-{% for f in firmwares %}<tr><td>{{ f.version }}</td>
-<td class="muted">{{ f.board }}</td><td>{{ f.notes }}</td>
-<td class="muted">{{ f.created[:16] }}</td>
-<td class="muted">{% if bundles[f.version ~ "|" ~ f.board] %}complete{% else %}app only{% endif %}</td>
-<td>{% if f.active %}<span class="ok">ACTIVE</span>{% endif %}</td>
-<td>{% if not f.active %}<form method="post"
-action="/admin/firmware/{{ f.board }}/{{ f.version }}/activate">
-<button>Activate</button></form>{% endif %}</td></tr>{% endfor %}
+<tr><th>Version</th><th>Notes</th><th>Uploaded</th>
+{% for key, label in board_cols %}<th>{{ label }}</th>{% endfor %}</tr>
+{% for rel in releases %}<tr><td>{{ rel.version }}</td>
+<td class="notes">{{ rel.notes }}</td>
+<td class="muted">{{ rel.created[:16] }}</td>
+{% for key, label in board_cols %}{% set fw = rel.boards.get(key) %}<td>
+{%- if not fw %}<span class="muted">—</span>
+{%- elif fw.active %}<span class="ok">ACTIVE</span>
+{%- else %}<form method="post"
+action="/admin/firmware/{{ key }}/{{ rel.version }}/activate">
+<button>Activate</button></form>{% endif %}
+{%- if fw and not fw.bundle %}<div class="muted">app only</div>{% endif %}
+</td>{% endfor %}</tr>{% endfor %}
 </table>
-<p class="muted">Devices check daily and self-update to the active version.</p></div>
+<p class="muted">Devices check daily and self-update to their model's
+active version. "app only" builds lack the bootloader + partition table
+the web flasher needs.</p></div>
 <div class="card"><h2>Get a new version</h2>
 <form method="post" action="/admin/firmware/fetch">
 <button>Fetch latest release</button></form>

@@ -364,10 +364,26 @@ def firmware_page(request: Request, ident: Identity = AdminDep,
                   msg: str = None):
     with db.conn() as c:
         rows = db.all_(c, "SELECT * FROM firmware ORDER BY created DESC")
-    bundles = {f"{r['version']}|{r['board']}": all(
-        os.path.exists(provision.asset_path(r["version"], k, r["board"]))
-        for k in provision.ASSET_KINDS) for r in rows}
-    return _page(request, "firmware.html", firmwares=rows, bundles=bundles,
+    # One table row per version; one status/activate column per model.
+    board_cols = [(k, b["label"]) for k, b in boards.BOARDS.items()]
+    board_cols += [(k, k) for k in                # rows from retired models
+                   sorted({r["board"] for r in rows} - set(boards.BOARDS))]
+    releases, by_ver = [], {}
+    for r in rows:
+        rel = by_ver.get(r["version"])
+        if rel is None:
+            rel = by_ver[r["version"]] = {"version": r["version"],
+                                          "notes": r["notes"],
+                                          "created": r["created"],
+                                          "boards": {}}
+            releases.append(rel)
+        if r["notes"] and not rel["notes"]:
+            rel["notes"] = r["notes"]
+        rel["boards"][r["board"]] = {"active": r["active"], "bundle": all(
+            os.path.exists(provision.asset_path(r["version"], k, r["board"]))
+            for k in provision.ASSET_KINDS)}
+    return _page(request, "firmware.html", releases=releases,
+                 board_cols=board_cols,
                  msg=msg, release_url=release.MANIFEST_URL, me=ident)
 
 
