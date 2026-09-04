@@ -108,7 +108,9 @@ def _login_response(u) -> JSONResponse:
                          "color": u["color"],
                          "theme": t["name"] if t else None,
                          "theme_fg": t["fg"] if t else None,
-                         "theme_ver": themes.version_of(t["name"]) if t else None,
+                         "theme_ver": (themes.version_of(t["name"],
+                                                         themes.WEB_FORMAT)
+                                       if t else None),
                          "managed": _managed_summary(u["id"])})
     _set_session_cookie(resp, token)
     return resp
@@ -241,19 +243,36 @@ def me(ident: Identity = AuthDep):
             "color": ident.color,
             "theme": t["name"] if t else None,
             "theme_fg": t["fg"] if t else None,
-            "theme_ver": themes.version_of(t["name"]) if t else None,
+            "theme_ver": (themes.version_of(t["name"],
+                                            _client_theme_format(ident))
+                          if t else None),
             "managed": _managed_summary(ident.user_id)}
 
 
 # ---------- background themes ----------
+def _client_theme_format(ident: Identity):
+    """Theme format of the CALLING client: a box gets its board's format,
+    a phone user the PWA's. Versions handed to a client (list, /v1/me,
+    login) must match the rendition it will download, or its cache never
+    busts on a per-format master change."""
+    if ident.device_id:
+        with db.conn() as c:
+            row = db.one(c, "SELECT board FROM devices WHERE id=?",
+                         (ident.device_id,))
+        return themes.board_format(row["board"]) if row else None
+    return themes.WEB_FORMAT
+
+
 @router.get("/themes")
 def theme_list(ident: Identity = AuthDep):
+    fmt = _client_theme_format(ident)
     return [{"name": t["name"], "label": t["label"], "fg": t["fg"],
-             "ver": themes.version_of(t["name"])}
+             "ver": themes.version_of(t["name"], fmt)}
             for t in themes.available()]
 
 
-def _theme_asset(name: str, path: str, media: str, v: str | None):
+def _theme_asset(name: str, path: str, media: str, v: str | None,
+                 fmt: str | None = None):
     """Theme images are immutable per version: a ?v= URL that matches the
     current content hash may be cached forever (a master change flips the
     hash, so clients switch URLs); anything else must revalidate (cheap
@@ -263,7 +282,7 @@ def _theme_asset(name: str, path: str, media: str, v: str | None):
     resp = FileResponse(path, media_type=media)
     resp.headers["Cache-Control"] = (
         "public, max-age=31536000, immutable"
-        if v and v == themes.version_of(name) else "no-cache")
+        if v and v == themes.version_of(name, fmt) else "no-cache")
     return resp
 
 
@@ -291,20 +310,25 @@ def _board_param(board: str | None) -> str:
 @router.get("/themes/{name}/device.bin")
 def theme_device(name: str, ident: Identity = AuthDep, v: str = None,
                  board: str = None):
-    return _theme_asset(name, themes.device_path(name, _board_param(board)),
-                        "application/octet-stream", v)
+    b = _board_param(board)
+    return _theme_asset(name, themes.device_path(name, b),
+                        "application/octet-stream", v,
+                        themes.board_format(b))
 
 
 @router.get("/themes/{name}/thumb.bin")
 def theme_thumb(name: str, ident: Identity = AuthDep, v: str = None,
                 board: str = None):
-    return _theme_asset(name, themes.thumb_path(name, _board_param(board)),
-                        "application/octet-stream", v)
+    b = _board_param(board)
+    return _theme_asset(name, themes.thumb_path(name, b),
+                        "application/octet-stream", v,
+                        themes.board_format(b))
 
 
 @router.get("/themes/{name}/web.jpg")
 def theme_web(name: str, ident: Identity = AuthDep, v: str = None):
-    return _theme_asset(name, themes.web_path(name), "image/jpeg", v)
+    return _theme_asset(name, themes.web_path(name), "image/jpeg", v,
+                        themes.WEB_FORMAT)
 
 
 # ---------- per-device config (voice control) ----------

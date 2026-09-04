@@ -188,8 +188,9 @@ r = c.post("/admin/firmware", data={"version": "0.2.0", "notes": "t",
            files={"file": ("fw.bin", io.BytesIO(b"FWDATA"))})
 ok(r.status_code == 303, "firmware uploaded+activated")
 r = c.get("/v1/firmware", headers=H_E)
-ok(r.json()["version"] == "0.2.0" and r.json()["url"].endswith("/v1/firmware/0.2.0.bin"),
-   "manifest serves active version")
+ok(r.json()["version"] == "0.2.0" and r.json()["url"].endswith(
+       "/v1/firmware/0.2.0.bin?board=amoled-1.8"),
+   "manifest serves active version (board-tagged URL)")
 ok(c.get("/v1/firmware/0.2.0.bin", headers=H_E).content == b"FWDATA",
    "firmware binary downloads")
 
@@ -219,6 +220,19 @@ ok("immutable" in r.headers.get("cache-control", ""),
 r = c.get(f"/v1/themes/{t0['name']}/web.jpg", headers=H_E)
 ok(r.headers.get("cache-control") == "no-cache",
    "version-less asset must revalidate")
+# list vers are the CALLER's format: H_E is a 1.8 box (base master), a
+# phone user gets the -phone master's hash - and each matches only its
+# own rendition, so per-format master changes bust exactly their clients
+tp = next(t for t in c.get("/v1/themes", headers=utok).json()
+          if t["name"] == t0["name"])
+ok(tp["ver"] != t0["ver"],
+   "phone-user list ver differs from the 1.8 box's (per-format masters)")
+r = c.get(f"/v1/themes/{t0['name']}/web.jpg?v={tp['ver']}", headers=utok)
+ok("immutable" in r.headers.get("cache-control", ""),
+   "phone ver matches web.jpg immutable")
+r = c.get(f"/v1/themes/{t0['name']}/web.jpg?v={t0['ver']}", headers=utok)
+ok(r.headers.get("cache-control") == "no-cache",
+   "a 1.8 ver on web.jpg must not cache immutable")
 r = c.get(f"/v1/themes/{t0['name']}/device.bin?v=stale123", headers=H_E)
 ok(r.status_code == 200 and r.headers.get("cache-control") == "no-cache"
    and len(r.content) == 368 * 448 * 2,

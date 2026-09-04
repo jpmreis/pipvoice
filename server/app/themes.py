@@ -17,16 +17,27 @@ every theme exists in FOUR versions, one per board plus the PWA:
 The raw .bin renditions are the panels' native format, so the firmware
 loads bytes straight into PSRAM with no image decoder; a device asks for
 its own rendition with ?board= (api.py) and its byte-count guard rejects
-a wrong-size file. The round/square renditions are centre-crops of the
-same 4:5 masters for now - format-aware masters (round: centre-weighted,
-nothing in the corners) are a planned regeneration pass.
+a wrong-size file.
+
+A theme may ship per-format masters next to the base 4:5 one, and each
+rendition is cut from the closest master (falling back to the base):
+  <name>-round.jpeg    1:1, all content inside the inscribed circle,
+                       black corners (amoled-1.75b)
+  <name>-square.jpeg   1:1 (amoled-2.16)
+  <name>-phone.jpeg    9:16 portrait (PWA web.jpg)
+The base <name>.jpeg stays the 1.8's source and the universal fallback;
+its hash keys the 1.8 fleet's caches, so never regenerate it.
 
 fg is the color for text drawn directly on the background; text inside its
 own surface (avatars, buttons, message rows) keeps the normal palette.
 
-Each theme has a version: sha256 of its master, 8 hex chars. Clients cache
-thumbs/backgrounds keyed by it and skip the download when it is unchanged
-(PWA: immutable-cache ?v= URLs; device: LittleFS files named <name>-<ver>).
+Each theme has a version per FORMAT: sha256 of the master that format is
+cut from, 8 hex chars. Clients cache thumbs/backgrounds keyed by it and
+skip the download when it is unchanged (PWA: immutable-cache ?v= URLs;
+device: LittleFS files named <name>-<ver>). api.py picks the format from
+the calling client (device row's board, or the PWA), so adding/updating
+a -round/-square/-phone master cache-busts exactly the clients that
+consume it while the 1.8's base-master version stays untouched.
 """
 import hashlib
 import logging
@@ -49,6 +60,15 @@ THUMBS = {
     "amoled-2.16":  (106, 106),
 }
 
+# which per-format master feeds each board's renditions (None = the base
+# 4:5 master; also the fallback when the format master doesn't exist)
+FORMATS = {
+    "amoled-1.8":   None,
+    "amoled-1.75b": "round",
+    "amoled-2.16":  "square",
+}
+WEB_FORMAT = "phone"
+
 THEMES = [
     {"name": "cloud",    "label": "Cloud",    "fg": "white"},
     {"name": "dark",     "label": "Dark",     "fg": "white"},
@@ -65,6 +85,20 @@ THEMES = [
 
 def get(name):
     return next((t for t in THEMES if t["name"] == name), None)
+
+
+def board_format(board: str):
+    """Master format key for a board ('round'/'square'/None)."""
+    return FORMATS.get(board)
+
+
+def master_path(name: str, fmt: str | None = None) -> str:
+    """Source master for a format, falling back to the base 4:5 one."""
+    if fmt:
+        p = os.path.join(SRC_DIR, f"{name}-{fmt}.jpeg")
+        if os.path.exists(p):
+            return p
+    return os.path.join(SRC_DIR, name + ".jpeg")
 
 
 def _suffix(board: str) -> str:
@@ -84,22 +118,24 @@ def web_path(name: str) -> str:
     return os.path.join(OUT_DIR, f"{name}-web.jpg")
 
 
-_ver_cache = {}   # name -> (master mtime, ver)
+_ver_cache = {}   # (name, fmt) -> (master path, mtime, ver)
 
 
-def version_of(name: str) -> str:
-    """8-hex content hash of the theme's master image."""
-    src = os.path.join(SRC_DIR, name + ".jpeg")
+def version_of(name: str, fmt: str | None = None) -> str:
+    """8-hex content hash of the master a format is cut from. A format
+    without its own master inherits the base master's hash, so fallback
+    renditions share the base version."""
+    src = master_path(name, fmt)
     try:
         mt = os.path.getmtime(src)
     except OSError:
         return "0"
-    hit = _ver_cache.get(name)
-    if hit and hit[0] == mt:
-        return hit[1]
+    hit = _ver_cache.get((name, fmt))
+    if hit and hit[0] == src and hit[1] == mt:
+        return hit[2]
     with open(src, "rb") as f:
         ver = hashlib.sha256(f.read()).hexdigest()[:8]
-    _ver_cache[name] = (mt, ver)
+    _ver_cache[(name, fmt)] = (src, mt, ver)
     return ver
 
 
@@ -121,23 +157,25 @@ def _raw565(src: str, dst: str, w: int, h: int) -> None:
 def render_all() -> None:
     """(Re)render any variant that is missing or older than its master."""
     os.makedirs(OUT_DIR, exist_ok=True)
+    stale = lambda p, src: (not os.path.exists(p)
+                            or os.path.getmtime(p) < os.path.getmtime(src))
     for t in THEMES:
-        src = os.path.join(SRC_DIR, t["name"] + ".jpeg")
-        if not os.path.exists(src):
-            log.warning("theme %s: master missing (%s)", t["name"], src)
+        if not os.path.exists(master_path(t["name"])):
+            log.warning("theme %s: master missing (%s)", t["name"],
+                        master_path(t["name"]))
             continue
-        stale = lambda p: (not os.path.exists(p)
-                           or os.path.getmtime(p) < os.path.getmtime(src))
         try:
             for board, spec in boards.BOARDS.items():
+                src = master_path(t["name"], FORMATS[board])
                 scr = spec["screen"]
-                if stale(device_path(t["name"], board)):
+                if stale(device_path(t["name"], board), src):
                     _raw565(src, device_path(t["name"], board),
                             scr["w"], scr["h"])
                 tw, th = THUMBS[board]
-                if stale(thumb_path(t["name"], board)):
+                if stale(thumb_path(t["name"], board), src):
                     _raw565(src, thumb_path(t["name"], board), tw, th)
-            if stale(web_path(t["name"])):
+            src = master_path(t["name"], WEB_FORMAT)
+            if stale(web_path(t["name"]), src):
                 _ffmpeg(src, web_path(t["name"]),
                         "-vf", "scale=1080:-2:flags=lanczos", "-q:v", "4")
             log.info("theme %s ready", t["name"])
