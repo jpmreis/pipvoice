@@ -3,18 +3,17 @@
 {% if sent == "1" %}<p class="ok">Install email sent.</p>
 {% elif sent == "0" %}<p class="bad">Install email NOT sent &mdash; the user
 needs an email address and the server needs SMTP configured.</p>{% endif %}
-<div class="card"><table>
-<tr><th></th><th>Username</th><th>Name</th><th>Kind</th><th>Email</th><th>Admin</th><th></th></tr>
-{% for u in users %}<tr>
+<div class="card"><h2>Phone users</h2><table>
+<tr><th></th><th>Username</th><th>Name</th><th>Email</th><th>Admin</th><th></th></tr>
+{% for u in users if u.username not in device_users %}<tr>
 <td><span class="dot" style="background:#{{ u.color }}"></span></td>
 <td>{{ u.username }}</td><td>{{ u.display_name }}</td>
-<td>{% if u.username in device_users %}device{% else %}phone{% endif %}</td>
 <td><form method="post" action="/admin/users/{{ u.id }}/email"
      style="display:flex;gap:6px;align-items:center">
 <input name="email" type="email" value="{{ u.email or '' }}"
        placeholder="no email" style="width:210px">
 <button>Save</button></form>
-{% if local_auth and u.username not in device_users %}
+{% if local_auth %}
 <form method="post" action="/admin/users/{{ u.id }}/password"
      style="display:flex;gap:6px;align-items:center;margin-top:4px">
 <input name="password" type="password" minlength="8"
@@ -23,17 +22,31 @@ needs an email address and the server needs SMTP configured.</p>{% endif %}
 <button>Set</button></form>
 {% endif %}</td>
 <td>{{ "yes" if u.is_admin else "" }}</td>
-<td>{% if u.email and u.username not in device_users %}
+<td>{% if u.email %}
 <form method="post" action="/admin/users/{{ u.id }}/send-install">
 <button>Send install email</button></form>
 {% endif %}</td></tr>{% endfor %}
-</table></div>
-<p class="muted">A user with a provisioned device is a device user; everyone
-else is a phone user (PWA at <code>/app</code>). Phone users sign in with a
-code sent to their email{% if local_auth %} or with their local password
-(set one above to skip email codes entirely){% else %} &mdash; no email, no
-sign-in{% endif %}. "Send install email" mails them the setup
-instructions.</p>
+</table>
+<p class="muted">Phone users use the PWA at <code>/app</code> and sign in
+with a code sent to their email{% if local_auth %} or with their local
+password (set one above to skip email codes entirely){% else %} &mdash;
+no email, no sign-in{% endif %}. "Send install email" mails them the
+setup instructions.</p></div>
+<div class="card"><h2>Device users</h2><table>
+<tr><th></th><th>Username</th><th>Name</th><th>Email</th><th>Admin</th></tr>
+{% for u in users if u.username in device_users %}<tr>
+<td><span class="dot" style="background:#{{ u.color }}"></span></td>
+<td>{{ u.username }}</td><td>{{ u.display_name }}</td>
+<td><form method="post" action="/admin/users/{{ u.id }}/email"
+     style="display:flex;gap:6px;align-items:center">
+<input name="email" type="email" value="{{ u.email or '' }}"
+       placeholder="no email" style="width:210px">
+<button>Save</button></form></td>
+<td>{{ "yes" if u.is_admin else "" }}</td></tr>{% endfor %}
+</table>
+<p class="muted">A device user is the identity a Pip box speaks and
+messages as &mdash; anyone with a provisioned device. Boxes sign in with
+their provisioning token, so no email is needed.</p></div>
 <div class="card"><h2>Add user</h2>
 <form method="post">
 <input name="username" placeholder="username (internal id)" required>
