@@ -31,13 +31,16 @@ app.include_router(api_router)
 app.include_router(admin_router)
 
 
-# /app assets that may cache for a day; everything else under /app is the
+# The single home of the /app cache policy (Caddy adds none): fonts never
+# change, icons/vendored libs/board art rarely; everything else is the
 # shell and must revalidate on every load - StaticFiles sends no
 # Cache-Control, and iOS then heuristic-caches (~10% of Last-Modified age)
 # and serves the old shell without asking, defeating the service worker's
 # network-first fetch even across a force-quit
-_APP_LONG_CACHE = ("/app/fonts/", "/app/icons/", "/app/vendor/",
-                   "/app/boards/")
+_APP_CACHE = (("/app/fonts/", "public, max-age=31536000, immutable"),
+              ("/app/icons/", "public, max-age=2592000"),
+              ("/app/vendor/", "public, max-age=86400"),
+              ("/app/boards/", "public, max-age=86400"))
 
 
 @app.middleware("http")
@@ -50,9 +53,12 @@ async def _stamp_version(request, call_next):
     if path.startswith("/v1/"):
         resp.headers["X-Pip-Version"] = api.global_version()
     elif path.startswith("/app"):
-        resp.headers["Cache-Control"] = (
-            "public, max-age=86400" if path.startswith(_APP_LONG_CACHE)
-            else "no-cache")           # revalidate: ETag makes this a 304
+        for prefix, policy in _APP_CACHE:
+            if path.startswith(prefix):
+                resp.headers["Cache-Control"] = policy
+                break
+        else:                          # revalidate: ETag makes this a 304
+            resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 # the phone-user PWA: /app/ (html=True serves index.html at the root)
