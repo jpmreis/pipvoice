@@ -2,7 +2,22 @@
 <h1>Firmware / OTA</h1>
 {% if msg %}<div class="card"><p>{{ msg }}</p></div>{% endif %}
 <style>td.notes{color:var(--dim);font-size:13px;max-width:300px}</style>
-<div class="card"><table>
+<div class="card"><h2>Get a new version</h2>
+<form method="post" action="/admin/firmware/fetch">
+<button>Fetch latest release</button></form>
+<p class="muted">Downloads the newest published release (app +
+bootloader + partition table, sha256-verified) from<br>
+<code>{{ release_url }}</code><br>
+It installs inactive — activate it below to roll out the fleet.
+Each model activates separately (one active build per board).
+Development builds can still be pushed with a POST to
+<code>/admin/firmware</code> (fields: version, notes, file, bootloader,
+parttable, activate, board).</p></div>
+<div class="card">
+<p class="muted">Devices check daily and self-update to their model's
+active version. "app only" builds lack the bootloader + partition table
+the web flasher needs.</p>
+<table>
 <tr><th>Version</th><th>Notes</th><th>Uploaded</th>
 {% for key, label in board_cols %}<th>{{ label }}</th>{% endfor %}</tr>
 {% for rel in releases %}<tr><td>{{ rel.version }}</td>
@@ -16,19 +31,5 @@ action="/admin/firmware/{{ key }}/{{ rel.version }}/activate">
 <button>Activate</button></form>{% endif %}
 {%- if fw and not fw.bundle %}<div class="muted">app only</div>{% endif %}
 </td>{% endfor %}</tr>{% endfor %}
-</table>
-<p class="muted">Devices check daily and self-update to their model's
-active version. "app only" builds lack the bootloader + partition table
-the web flasher needs.</p></div>
-<div class="card"><h2>Get a new version</h2>
-<form method="post" action="/admin/firmware/fetch">
-<button>Fetch latest release</button></form>
-<p class="muted">Downloads the newest published release (app +
-bootloader + partition table, sha256-verified) from<br>
-<code>{{ release_url }}</code><br>
-It installs inactive — activate it above to roll out the fleet.
-Each model activates separately (one active build per board).
-Development builds can still be pushed with a POST to
-<code>/admin/firmware</code> (fields: version, notes, file, bootloader,
-parttable, activate, board).</p></div>
+</table></div>
 {% endblock %}

@@ -104,15 +104,23 @@
     <div id="set-me"></div>
     <div class="small dim" id="set-notify-state" style="margin-top:8px"></div>
   </div>
-  <div class="card">
-    <div class="small dim" style="font-weight:600;margin-bottom:10px">BACKGROUND</div>
-    <div class="themes" id="themes"></div>
-  </div>
+  <button class="btn" id="set-background">Background</button>
   <button class="btn" id="set-manage" style="display:none">Manage device</button>
   <button class="btn" id="set-setup">Set up a new Pip</button>
   <button class="btn" id="set-test">Send test notification</button>
   <button class="btn danger" id="set-logout">Sign out</button>
   <p class="small dim" style="text-align:center" id="set-version">Pip</p>
+</section>
+
+<section id="scr-background">
+  <header>
+    <button class="back" id="bg-back">&#8249;</button>
+    <span class="title">Background</span>
+    <span class="spacer"></span>
+  </header>
+  <div class="card">
+    <div class="themes" id="themes"></div>
+  </div>
 </section>
 
 <section id="scr-manage">

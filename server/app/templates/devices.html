@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block content %}
 <h1>Devices</h1>
 <div class="card"><table>
-<tr><th>Device</th><th>Model</th><th>Owner</th><th>Device admin</th><th>Voice control</th><th>Created</th><th>Last seen</th><th></th><th></th></tr>
+<tr><th>Device</th><th>Model</th><th>Owner</th><th>Device admin</th><th>Voice control</th><th>Created</th><th>Last seen</th><th></th></tr>
 {% for d in devices %}<tr><td>{{ d.id }}</td>
 <td class="muted">{{ d.board }}</td><td>{{ d.display_name }}</td>
 <td><form method="post" action="/admin/devices/{{ d.id }}/admin" style="display:flex;gap:6px;align-items:center">
@@ -16,25 +16,14 @@
 </form></td>
 <td class="muted">{{ d.created[:10] }}</td>
 <td class="muted">{{ d.last_seen or "never" }}</td>
-<td><a href="/app/setup.html?flash={{ d.id }}">Web flash</a></td>
 <td><form method="post" action="/admin/devices/{{ d.id }}/delete"
 onsubmit="return confirm('Revoke {{ d.id }}? Its token stops working immediately.')">
 <button style="background:var(--bad);color:#fff">Revoke</button></form></td></tr>{% endfor %}
 </table></div>
 <p class="muted">The device admin manages this device's contact list from
-their own PWA (Settings &rarr; Manage device). Web flash opens the browser
-flasher (Chrome/Edge + USB) and issues the box <b>fresh credentials</b> -
-it is offline until the flash completes. Voice control is the hands-free
-accessibility mode ("Hey Pip"): the box wakes on the phrase, offers new
-messages, and cycles contacts for a spoken "yes" - needs firmware with
-voice support.</p>
-<div class="card"><h2>Provision new device</h2>
-<form method="post">
-<input name="device_id" placeholder="device id, e.g. pip-ella-01" required>
-<select name="user_id">{% for u in users %}
-<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}</select>
-<input name="pin" placeholder="settings PIN" value="1234" size="6"><br>
-<button>Provision</button></form>
-<p class="muted">Generates the auth token, MQTT credentials and the NVS CSV.
-Secrets are shown once.</p></div>
+their own PWA (Settings &rarr; Manage device). Voice control is the
+hands-free accessibility mode ("Hey Pip"): the box wakes on the phrase,
+offers new messages, and cycles contacts for a spoken "yes" - needs
+firmware with voice support. New devices are provisioned from the PWA
+(Settings &rarr; Set up a new Pip).</p>
 {% endblock %}

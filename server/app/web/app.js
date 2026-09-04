@@ -831,10 +831,14 @@ $("btn-settings").onclick = () => {
   $("set-manage").style.display = managed.length ? "block" : "none";
   $("set-manage").textContent =
     managed.length > 1 ? "Manage devices" : "Manage device";
-  loadThemes().catch(() => {});
   show("scr-settings");
 };
 $("set-back").onclick = home;
+$("set-background").onclick = () => {
+  loadThemes().catch(() => {});
+  show("scr-background");
+};
+$("bg-back").onclick = () => show("scr-settings");
 /* device setup + web flashing lives on its own page (needs Web Serial,
    i.e. a computer running Chrome/Edge - the page says so elsewhere) */
 $("set-setup").onclick = () => { location.href = "setup.html"; };
@@ -893,8 +897,9 @@ function manageCard(d) {
      </div>
      <div class="small mng-err" style="color:var(--danger)"></div>
      <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:14px">
-       <input type="checkbox" class="mng-voice" ${d.voice ? "checked" : ""}>
-       Voice control (accessibility) &mdash; hands-free "Hey Pip"
+       <input type="checkbox" class="mng-voice" style="flex:none" ${d.voice ? "checked" : ""}>
+       <span style="flex:1;min-width:0">Voice control (accessibility)
+         &mdash; hands-free "Hey Pip"</span>
      </label>
      <p class="small dim" style="margin:14px 0 0">
        <a href="setup.html?flash=${esc(d.device_id)}"
