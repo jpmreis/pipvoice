@@ -15,6 +15,10 @@
 #include "esp_log.h"
 #if defined(PIP_BOARD_AMOLED_1_75B) || defined(PIP_BOARD_AMOLED_2_16)
 #define PIP_BSP_LVGL_ADAPTER 1
+#include "bsp/display.h"
+#include "esp_lv_adapter.h"
+#include "esp_lv_adapter_display.h"
+#include "esp_lv_adapter_input.h"
 #else
 #define PIP_BSP_LVGL_ADAPTER 0
 #include "esp_lvgl_port.h"
@@ -103,23 +107,88 @@ static void pmu_init(void)
 }
 
 #if PIP_BSP_LVGL_ADAPTER
-/* 1.75-B / 2.16 (BSP 3.x): the BSP's own start path is sound - the
- * esp_lvgl_adapter waits for the panel IO color-done callback before
- * releasing draw buffers, registers the 2 px rounder, and brings up
- * touch (CST9217/CST9220) and the brightness LEDC itself. Draw buffers
- * live in PSRAM per the BSP profile, which spares the internal RAM the
- * audio task and WiFi need.
- *
- * UNTESTED ON HARDWARE: first bring-up should watch the boot heap
- * ledger and the panel for tearing before anything else. */
+/* 1.75-B / 2.16 (BSP 3.x + esp_lvgl_adapter). Same sequence as the BSP's
+ * bsp_display_start(), inlined so the draw-buffer profile is OURS: the
+ * BSP asks for two 50-row buffers in PSRAM, and on the S3 the QSPI panel
+ * IO cannot DMA from PSRAM (the BSP never sets psram_dma_direct), so
+ * every flush bounce-copies through a ~47 KB internal DMA buffer that
+ * spi_master allocates on the spot. That worked until WiFi came up and
+ * left no 47 KB block: first bring-up (1.3.8 on the 1.75-B) logged
+ * "Failed to allocate priv TX buffer" on every draw once the setup AP
+ * was running. A small internal buffer (PIP_DRAW_ROWS rows, ~19 KB,
+ * single) is DMA-able as-is - the 1.8 has run this way from day one.
+ * The panel + IO (with the BSP's private init-command table) still come
+ * from bsp_display_new(); touch and brightness from the BSP too. */
+#define PIP_DRAW_ROWS 20
+
+static void rounder_event_cb(lv_event_t *e)      /* CO5300: 2 px alignment */
+{
+    lv_area_t *area = lv_event_get_param(e);
+    area->x1 &= ~1;  area->y1 &= ~1;
+    area->x2 |= 1;   area->y2 |= 1;
+}
+
 static void display_init(void)
 {
-    if (!bsp_display_start()) {
+    bsp_display_cfg_t cfg = {
+        .lv_adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG(),
+        .rotation = ESP_LV_ADAPTER_ROTATE_0,
+        .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE,
+#if defined(PIP_BOARD_AMOLED_2_16)
+        .touch_flags = { .swap_xy = 1, .mirror_x = 0, .mirror_y = 1 },
+#else
+        .touch_flags = { .swap_xy = 0, .mirror_x = 1, .mirror_y = 1 },
+#endif
+    };                              /* touch flags = each BSP's own default */
+    ESP_ERROR_CHECK(esp_lv_adapter_init(&cfg.lv_adapter_cfg));
+
+    const bsp_display_config_t disp_config = {
+        .max_transfer_sz = BSP_LCD_H_RES * PIP_DRAW_ROWS * BSP_LCD_BITS_PER_PIXEL / 8,
+    };
+    esp_lcd_panel_handle_t panel = NULL;
+    esp_lcd_panel_io_handle_t io = NULL;
+    if (bsp_display_new(&disp_config, &panel, &io) != ESP_OK || !panel || !io) {
+        ESP_LOGE(TAG, "display init failed");
+        abort();
+    }
+
+    const esp_lv_adapter_display_config_t disp_cfg = {
+        .panel = panel,
+        .panel_io = io,
+        .profile = {
+            .interface = ESP_LV_ADAPTER_PANEL_IF_OTHER,
+            .rotation = ESP_LV_ADAPTER_ROTATE_0,
+            .hor_res = BSP_LCD_H_RES,
+            .ver_res = BSP_LCD_V_RES,
+            .buffer_height = PIP_DRAW_ROWS,
+            .use_psram = false,             /* internal = DMA-able, no bounce */
+            .enable_ppa_accel = false,
+            .require_double_buffer = false,
+        },
+        .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE,
+    };
+    lv_display_t *disp = esp_lv_adapter_register_display(&disp_cfg);
+    if (!disp) {
         ESP_LOGE(TAG, "display start failed");
         abort();
     }
-    /* touch registers inside bsp_display_start (it fails hard without) */
+    lv_display_add_event_cb(disp, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+
+    esp_lcd_touch_handle_t tp = NULL;
+    if (bsp_touch_new(&cfg, &tp) != ESP_OK || !tp) {
+        ESP_LOGE(TAG, "touch init failed");     /* the BSP aborts here too */
+        abort();
+    }
+    const esp_lv_adapter_touch_config_t touch_cfg =
+        ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
+    if (!esp_lv_adapter_register_touch(&touch_cfg)) {
+        ESP_LOGE(TAG, "touch register failed");
+        abort();
+    }
     s_touch_ok = true;
+
+    ESP_ERROR_CHECK(bsp_display_brightness_init());
+    ESP_ERROR_CHECK(esp_lv_adapter_start());
 }
 #else
 /* 1.8 (BSP 2.x + esp_lvgl_port), wired manually - see display notes */
@@ -253,12 +322,13 @@ void board_set_brightness(uint8_t v)
     /* Brightness is a command on the panel's QSPI IO handle, which the LVGL
      * flush task also uses - serialize with the display lock. The lock is
      * recursive, so calls from LVGL callbacks are fine. */
-    if (!bsp_display_lock(250)) {
+    if (!board_lock(250)) {      /* NOT bsp_display_lock: its return type
+                                  * differs per BSP (bool vs esp_err_t) */
         ESP_LOGW(TAG, "brightness: display lock timeout");
         return;
     }
     bsp_display_brightness_set((v * 100) / 255);  /* BSP takes percent */
-    bsp_display_unlock();
+    board_unlock();
 }
 
 bool board_pwr_key_event(void)

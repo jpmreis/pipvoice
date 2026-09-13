@@ -12,6 +12,29 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.9] — 2026-09-13
+
+First hardware bring-up of the 1.75″ round board.
+
+### Fixed
+- 1.75″/2.16″ boards: setting the screen brightness took the display lock
+  and never released it (the 3.x BSP returns `esp_err_t`, which the
+  helper read as a failed bool), so every later UI update timed out and
+  the box sat on a frozen screen after the WiFi-setup access point came
+  up. The 1.8 was never affected.
+- 1.75″/2.16″ boards: the display's draw buffers moved from PSRAM to a
+  small internal buffer. On the ESP32-S3 the panel's QSPI DMA cannot
+  read PSRAM, so every screen flush was bounce-copied through a 47 KB
+  internal buffer allocated on the spot, and once WiFi was up there was
+  no such block left: every draw failed with `ESP_ERR_NO_MEM` and the
+  screen froze on the WiFi-setup QR. Same 20-row internal buffer the
+  1.8 has always used.
+- Web flasher: the boot-log check could match a half-received `PIP-HW`
+  line and then report the firmware as built for the wrong model
+  ("built for the 1.8 but registered as a 1.75-B") even though the
+  right image was on the box. It now waits for the complete line and
+  strips log colour codes.
+
 ## [1.3.8] — 2026-09-04
 
 Admin analytics. The server now keeps a week of detail (an event log

@@ -397,8 +397,10 @@ async function watchBoot(p, budgetMs, dbg) {
         detail("Pip firmware is running…");
       }
       if (buf.includes("boot complete")) complete = true;
-      const m = buf.match(/PIP-HW ([^\r\n]+)/);
-      if (m) { hw = m[1]; break; }
+      // only a complete line: a chunk boundary can land mid-line and a
+      // truncated "board=amoled-1." would read as the wrong model
+      const m = buf.match(/PIP-HW ([^\r\n]+)[\r\n]/);
+      if (m) { hw = m[1].replace(/\x1b\[[0-9;]*m/g, ""); break; }
       if (resets >= 3 && !started) break;   // boot loop
     }
   } catch (e) { dbg.push("read error: " + (e.name || e)); }
