@@ -156,6 +156,52 @@ h2 { font-size: clamp(28px, 4vw, 36px); font-weight: 700; line-height: 1.2;
 .byo .bd { font-size: 16px; line-height: 1.55; color: var(--dim);
   margin-top: 8px; }
 
+/* ---------- accessibility / voice mode ---------- */
+.access { padding: 96px 0; }
+.chat { background: var(--surface); border-radius: 24px; padding: 28px;
+  width: min(420px, 100%); margin: 0 auto; display: flex;
+  flex-direction: column; gap: 12px; }
+.chat .b { max-width: 84%; padding: 12px 16px; border-radius: 18px;
+  font-size: 17px; line-height: 1.4; }
+.chat .kid { align-self: flex-end; background: var(--accent); color: #000;
+  font-weight: 600; border-bottom-right-radius: 6px; }
+.chat .pip { align-self: flex-start; background: var(--surface2);
+  border-bottom-left-radius: 6px; }
+.chat .rec { align-self: flex-start; display: flex; align-items: center;
+  gap: 10px; color: var(--dim); font-size: 15px; padding: 4px 6px; }
+.chat .rec i { width: 12px; height: 12px; border-radius: 50%;
+  background: var(--danger); flex-shrink: 0; animation: blink 1.2s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .chat .rec i { animation: none; } }
+.chat .ding { align-self: center; color: var(--accent); font-weight: 700;
+  font-size: 20px; transform: rotate(-6deg); margin-top: 4px; }
+
+/* ---------- the boards popup ---------- */
+.boards { background: var(--surface); color: var(--text);
+  border: 1px solid var(--surface2); border-radius: 24px; padding: 28px;
+  width: min(600px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+  overflow: auto; }
+.boards::backdrop { background: rgba(0, 0, 0, .72); }
+.boards .dhead { display: flex; align-items: flex-start; gap: 16px; }
+.boards .dhead h3 { font-size: 22px; font-weight: 700; line-height: 1.25;
+  margin: 10px 0 0; flex: 1; }
+.boards .dclose { margin-left: auto; width: 40px; height: 40px;
+  border-radius: 50%; border: 0; background: var(--surface2);
+  color: var(--text); font-size: 22px; line-height: 1; cursor: pointer;
+  flex-shrink: 0; }
+.boards .dsub { font-size: 16px; line-height: 1.55; color: var(--dim);
+  margin: 12px 0 8px; }
+.board { display: flex; gap: 18px; align-items: center; padding: 16px 0;
+  border-top: 1px solid var(--surface2); }
+.board img { width: 88px; height: 88px; object-fit: cover; border-radius: 16px;
+  background: #fff; flex-shrink: 0; }
+.board .bn { font-size: 18px; font-weight: 700; }
+.board .bn span { font-weight: 400; color: var(--dim); font-size: 15px;
+  margin-left: 8px; }
+.board .bdsc { font-size: 15px; line-height: 1.5; color: var(--dim);
+  margin-top: 4px; }
+.board .bprice { font-size: 15px; margin-top: 6px; }
+
 /* ---------- how it works ---------- */
 .how { display: flex; flex-direction: column; align-items: center;
   padding: 100px 24px 84px; }
@@ -361,15 +407,113 @@ footer { border-top: 1px solid var(--surface2); padding: 44px 0 40px; }
 
       <div class="byo">
         <div class="bt">Bring your own box</div>
-        <div class="bd">Pip runs on an off-the-shelf mini board (we like
-        the <a href="https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm"
-        target="_blank" rel="noopener">Waveshare ESP32-S3 Touch
-        1.8&Prime;</a>). Order it online. When it arrives,
+        <div class="bd">Pip runs on an <a href="#boards"
+        id="boardlink">off-the-shelf mini board</a>. Order it online.
+        When it arrives,
         plug it into your computer, open __HOST__, and press one
         button. Two minutes later the bare little gadget is a member of
         the family. No soldering, no downloads, no shipping it anywhere -
         if you can plug in a USB cable, you're overqualified.</div>
       </div>
+    </div>
+  </div>
+
+  <dialog id="boards" class="boards" aria-labelledby="boards-title">
+    <div class="dhead">
+      <div>
+        <div class="eyebrow">THE BOXES</div>
+        <h3 id="boards-title">Three boards, all about the size of a
+        smartwatch.</h3>
+      </div>
+      <button class="dclose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <p class="dsub">Pip is compatible with three Waveshare devices. Any of
+    them becomes a Pip the same way: plug in, one click.</p>
+
+    <div class="board">
+      <img src="/app/boards/amoled-1.8.jpg" alt="">
+      <div>
+        <div class="bn">1.8&Prime; <span>our original</span></div>
+        <div class="bdsc">Mic and speaker are ok. Best used handheld.</div>
+        <div class="bprice">About $30 &middot;
+          <a href="https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm"
+          target="_blank" rel="noopener">Waveshare ESP32-S3-Touch-AMOLED-1.8</a></div>
+      </div>
+    </div>
+    <div class="board">
+      <img src="/app/boards/amoled-1.75b.jpg" alt="">
+      <div>
+        <div class="bn">1.75&Prime; <span>round, cased</span></div>
+        <div class="bdsc">Comes with a small wired speaker and a better
+        microphone, with speaker and mic in separate places. Best WiFi
+        reception of the three. The best option for accessibility and
+        voice activation.</div>
+        <div class="bprice">About $35 &middot;
+          <a href="https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?sku=31262"
+          target="_blank" rel="noopener">Waveshare ESP32-S3-Touch-AMOLED-1.75-B</a></div>
+      </div>
+    </div>
+    <div class="board">
+      <img src="/app/boards/amoled-2.16.jpg" alt="">
+      <div>
+        <div class="bn">2.16&Prime; <span>square</span></div>
+        <div class="bdsc">Similar in size to the 1.8, with a better mic and
+        speaker but slightly weaker WiFi reception. Best for a dock or
+        desk setup.</div>
+        <div class="bprice">About $30 &middot;
+          <a href="https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm"
+          target="_blank" rel="noopener">Waveshare ESP32-S3-Touch-AMOLED-2.16</a></div>
+      </div>
+    </div>
+  </dialog>
+  <script>
+  (function () {
+    var dlg = document.getElementById("boards");
+    var link = document.getElementById("boardlink");
+    if (!dlg || !link || typeof dlg.showModal !== "function") return;
+    link.addEventListener("click", function (e) { e.preventDefault(); dlg.showModal(); });
+    dlg.querySelector(".dclose").addEventListener("click", function () { dlg.close(); });
+    dlg.addEventListener("click", function (e) {   /* backdrop click closes */
+      var r = dlg.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right ||
+          e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+    });
+  })();
+  </script>
+</section>
+
+<section class="access">
+  <div class="wrap twocol">
+    <div>
+      <div class="eyebrow">PIP FOR EVERYONE</div>
+      <h2>Hands-free, when hands are the hard part.</h2>
+      <p class="lead">Some people can talk but can't press a button. For
+      them, a box can be switched to voice mode, and from then on it
+      answers to its name.</p>
+
+      <div class="bullets">
+        <div class="bullet"><div><b>&ldquo;Hey Pip&rdquo; is the whole
+        interface.</b> The box asks, out loud, who the message is for;
+        &ldquo;yes&rdquo; is the only other word it needs to know. It
+        records, asks once more, and sends.</div></div>
+        <div class="bullet"><div><b>Listens on the box, not in the
+        cloud.</b> The wake word is recognised on the little chip itself.
+        No audio leaves the box until a Pip is actually sent.</div></div>
+        <div class="bullet"><div><b>A grown-up's switch.</b> Voice mode is
+        off by default and turned on per box from the app, for exactly
+        the people who need it.</div></div>
+      </div>
+    </div>
+
+    <div class="chat" role="img"
+         aria-label="A hands-free conversation with a Pip box: Hey Pip; Send a Pip to Mom?; Yes; recording; Send it?; Yes; ding">
+      <div class="b kid">Hey Pip</div>
+      <div class="b pip">Send a Pip to Mom?</div>
+      <div class="b kid">Yes</div>
+      <div class="rec"><i></i>recording&hellip; &ldquo;Mom, come see what I built!&rdquo;</div>
+      <div class="b pip">Send it?</div>
+      <div class="b kid">Yes</div>
+      <div class="ding">ding!</div>
     </div>
   </div>
 </section>
