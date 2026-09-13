@@ -90,6 +90,7 @@
 #define GEO_ROW_TEXT_X        62
 #define GEO_ROW_PLAY_DX       -10
 #define GEO_ROW_REACT_DX      -48
+#define GEO_ROW_META_SEP " \xe2\x80\xa2 "   /* U+2022 bullet (in LVGL's built-in Montserrat; U+00B7 is not): 300 px rows - the wide " - " overran the play glyph */
 #define GEO_SETTINGS_W        300
 
 /* pinpad */
@@ -202,6 +203,7 @@
 #define GEO_ROW_TEXT_X        74
 #define GEO_ROW_PLAY_DX       -12
 #define GEO_ROW_REACT_DX      -56
+#define GEO_ROW_META_SEP "   -   "
 #define GEO_SETTINGS_W        (SCREEN_W - 24)
 
 /* pinpad */
@@ -306,6 +308,7 @@
 #define GEO_ROW_TEXT_X        58
 #define GEO_ROW_PLAY_DX       -6
 #define GEO_ROW_REACT_DX      -46
+#define GEO_ROW_META_SEP "   -   "
 #define GEO_SETTINGS_W        (SCREEN_W - 24)
 
 /* pinpad */

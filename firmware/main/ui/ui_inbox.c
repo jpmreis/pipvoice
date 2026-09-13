@@ -146,11 +146,17 @@ void scr_inbox_refresh(void)
         /* unheard: amber meta line (matches the web client) on top of the
          * lighter row background; heard rows fall back to dim */
         lv_obj_t *meta = lv_label_create(row);
-        lv_label_set_text_fmt(meta, "%s   -   %u:%02u%s", m->when,
+        lv_label_set_text_fmt(meta, "%s%s%u:%02u%s%s", m->when,
+                              GEO_ROW_META_SEP,
                               m->duration_s / 60, m->duration_s % 60,
-                              m->heard ? "" : "   -   new");
+                              m->heard ? "" : GEO_ROW_META_SEP,
+                              m->heard ? "" : "new");
         lv_obj_set_style_text_font(meta, FONT_SMALL, 0);
         lv_obj_set_style_text_color(meta, m->heard ? COL_TEXT_DIM : COL_ACCENT, 0);
+        /* never run under the play glyph: clip at its left edge (first
+         * seen on the round board, where rows are only 300 px wide) */
+        lv_obj_set_width(meta, GEO_LIST_W - GEO_ROW_TEXT_X - 44);
+        lv_label_set_long_mode(meta, LV_LABEL_LONG_CLIP);
         lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, GEO_ROW_TEXT_X, -4);
 
         lv_obj_t *play = lv_label_create(row);

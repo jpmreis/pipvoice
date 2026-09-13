@@ -12,6 +12,30 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.10] — 2026-09-13
+
+Voice tuning for the round board, from its first bench session.
+
+### Added
+- 1.75″/2.16″ boards: both microphones of the ES7210 array are now
+  used. The two are averaged (a talker in front reaches both alike and
+  adds up; noise that differs between them partly cancels), with
+  automatic detection of a reversed mic. A coherence gate on top was
+  tried and dropped: on this board the quiet-room floor is already
+  0.93 coherent between the mics, so it had nothing to remove.
+- Wake-word cutoff is now per board. On the ES7210 boards it is 0.30
+  instead of the model's 0.45: clean "Hey Pip" scored 0.45–0.58 on the
+  1.75″ with a tail of 0.21–0.35 that the old cutoff dropped, while
+  ordinary speech and sound-alikes never passed 0.11. Mic gain (24, 30,
+  36 dB) and MIC1-only vs average made no difference to the scores.
+- Wake and confirm models log the peak score of every excursion, not
+  only detections, so a serial capture is enough to tune a board.
+
+### Fixed
+- Inbox on the round board: the "when · length · new" line ran under
+  the play glyph (rows are only 300 px). Compact separator on the round
+  board and the line is clipped before the glyph on all boards.
+
 ## [1.3.9] — 2026-09-13
 
 First hardware bring-up of the 1.75″ round board.

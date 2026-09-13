@@ -6,6 +6,7 @@
  * WINDOW probabilities over the model's cutoff. validate.py in
  * tools/wakeword replicates this loop bit-for-bit on the Mac. */
 #include "voice_infer.h"
+#include "board.h"
 #include "voice_models.h"
 
 #include "esp_heap_caps.h"
@@ -43,6 +44,7 @@ struct model_slot {
     const unsigned char *data;
     unsigned int         len;
     float                cutoff;
+    float                peak;        /* bench telemetry, see slot_feed */
     const char          *name;
 
     const tflite::Model             *model;
@@ -163,6 +165,16 @@ static bool slot_feed(model_slot *s, const int8_t *feat)
     for (int i = 0; i < WINDOW; i++) mean += s->probs[i];
     mean /= WINDOW;
 
+    /* Bench telemetry: log the peak of every excursion above 0.05 once
+     * it has decayed, so real wake attempts AND near-misses show up in
+     * the serial log with their scores (cutoff tuning per board). */
+    if (mean > 0.05f) { if (mean > s->peak) s->peak = mean; }
+    else if (s->peak > 0) {
+        ESP_LOGI(TAG, "%s peak p=%.2f (cutoff %.2f)", s->name,
+                 (double)s->peak, (double)s->cutoff);
+        s->peak = 0;
+    }
+
     int64_t now = esp_timer_get_time();
     if (mean > s->cutoff && now >= s->mute_until_us) {
         s->mute_until_us = now + (int64_t)REFRACTORY_MS * 1000;
@@ -196,11 +208,19 @@ extern "C" bool voice_infer_init(void)
         ESP_LOGE(TAG, "frontend init failed");
         return false;
     }
+    /* the embedded cutoffs were tuned on the 1.8's analog mic; boards
+     * with a cleaner front end override them from board.h */
+#ifndef PIP_WAKE_CUTOFF
+#define PIP_WAKE_CUTOFF voice_model_wake_cutoff
+#endif
+#ifndef PIP_CONFIRM_CUTOFF
+#define PIP_CONFIRM_CUTOFF voice_model_confirm_cutoff
+#endif
     bool wake = slot_init(&s_wake, voice_model_wake_data,
-                          voice_model_wake_len, voice_model_wake_cutoff,
+                          voice_model_wake_len, PIP_WAKE_CUTOFF,
                           voice_model_wake_name);
     slot_init(&s_confirm, voice_model_confirm_data,
-              voice_model_confirm_len, voice_model_confirm_cutoff,
+              voice_model_confirm_len, PIP_CONFIRM_CUTOFF,
               voice_model_confirm_name);   /* optional: VAD fallback */
     return wake;
 }

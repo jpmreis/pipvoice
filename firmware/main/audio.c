@@ -3,6 +3,7 @@
 #include "storage.h"
 #include "config.h"
 #include "voice_infer.h"
+#include "board.h"
 #include "bsp/esp-bsp.h"
 #include "esp_codec_dev.h"
 #include "esp_heap_caps.h"
@@ -56,6 +57,97 @@ static esp_codec_dev_sample_info_t s_fs = {
  * analog low for headroom and make the level up digitally. */
 #define MIC_GAIN_DB      24.0f
 #define REC_DIGITAL_GAIN 3.0f     /* +9.5 dB */
+
+/* ---- mic front end ----
+ * Everything below reads the mic through mic_open()/mic_read(), which
+ * hand back mono 16 kHz frames whatever the board captures. */
+static esp_codec_dev_sample_info_t s_mic_fs = {
+    .bits_per_sample = 16,
+    .channel = PIP_MIC_CHANNELS,
+    .sample_rate = VMSG_SAMPLE_RATE,
+    .mclk_multiple = 256,
+};
+
+#if PIP_MIC_CHANNELS == 2
+/* Dual-mic front end (ES7210 boards): the two MEMS mics are averaged.
+ * A near-field talker reaches both almost identically and adds
+ * coherently; noise that is uncorrelated between them partially
+ * cancels (~3 dB). A persistently negative inter-mic correlation means
+ * one mic is wired inverted (the sum would cancel speech) - detected
+ * from a slow DC-free correlation average and compensated.
+ *
+ * Bench 2026-09-13 (1.75-B): a coherence gate on top of the average was
+ * tried and dropped - the quiet-room floor on this board is 0.93
+ * coherent between the mics (they sit a few cm apart), so the gate had
+ * nothing to bite on and only shaved speech onsets. Mic gain 24/30/36 dB
+ * and MIC1-only vs average made no measurable difference to wake-word
+ * scores (the feature frontend normalises level); the lever that
+ * mattered was the per-board cutoff (PIP_WAKE_CUTOFF in board.h). */
+#define DM_LOG_HOPS  6000       /* one stats line per ~60 s of listening */
+
+static float    s_dm_pol;           /* slow mean correlation: polarity  */
+static bool     s_dm_flip;          /* MIC2 wired inverted -> negate it  */
+static uint32_t s_dm_hops;
+static float    s_dm_acc_coh, s_dm_acc_l, s_dm_acc_r;
+
+static void dualmic_process(const int16_t *st, int16_t *mono, size_t n)
+{
+    /* DC-free correlation: the mics carry a small shared DC offset that
+     * would otherwise dominate quiet hops */
+    float ml = 0, mr = 0;
+    for (size_t i = 0; i < n; i++) { ml += st[2 * i]; mr += st[2 * i + 1]; }
+    ml /= n; mr /= n;
+    float ll = 0, rr = 0, lr = 0;
+    for (size_t i = 0; i < n; i++) {
+        float l = st[2 * i] - ml, r = st[2 * i + 1] - mr;
+        ll += l * l; rr += r * r; lr += l * r;
+    }
+    float coh = lr / (sqrtf(ll * rr) + 1e4f);   /* silence -> ~0, not 0/0 */
+
+    s_dm_pol += (coh - s_dm_pol) * 0.002f;      /* ~5 s time constant     */
+    if (!s_dm_flip && s_dm_pol < -0.3f) {
+        s_dm_flip = true;  ESP_LOGW(TAG, "dualmic: MIC2 polarity inverted - compensating");
+    } else if (s_dm_flip && s_dm_pol > 0.3f) {
+        s_dm_flip = false; ESP_LOGW(TAG, "dualmic: MIC2 polarity normal again");
+    }
+
+    const float sgn = s_dm_flip ? -0.5f : 0.5f;
+    for (size_t i = 0; i < n; i++) {
+        float v = 0.5f * st[2 * i] + sgn * st[2 * i + 1];
+        mono[i] = v > 32767.f ? 32767 : v < -32768.f ? -32768 : (int16_t)v;
+    }
+
+    s_dm_acc_coh += coh; s_dm_acc_l += ll / n; s_dm_acc_r += rr / n;
+    if (++s_dm_hops >= DM_LOG_HOPS) {       /* a dead mic shows up here */
+        ESP_LOGI(TAG, "dualmic: coh %.2f mic1 %.0f mic2 %.0f rms",
+                 (double)(s_dm_acc_coh / s_dm_hops),
+                 (double)sqrtf(s_dm_acc_l / s_dm_hops),
+                 (double)sqrtf(s_dm_acc_r / s_dm_hops));
+        s_dm_hops = 0; s_dm_acc_coh = s_dm_acc_l = s_dm_acc_r = 0;
+    }
+}
+#endif
+
+static int mic_open(void)
+{
+    int r = esp_codec_dev_open(s_mic, &s_mic_fs);
+    if (r != 0) return r;
+    esp_codec_dev_set_in_gain(s_mic, MIC_GAIN_DB);
+    return 0;
+}
+
+/* read n mono samples (n <= VMSG_FRAME_SAMPLES); false on codec error */
+static bool mic_read(int16_t *mono, size_t n)
+{
+#if PIP_MIC_CHANNELS == 2
+    static int16_t st[2 * VMSG_FRAME_SAMPLES];
+    if (esp_codec_dev_read(s_mic, st, n * 2 * sizeof(int16_t)) != 0) return false;
+    dualmic_process(st, mono, n);
+    return true;
+#else
+    return esp_codec_dev_read(s_mic, mono, n * sizeof(int16_t)) == 0;
+#endif
+}
 
 /* ---- record-path DSP: high-pass -> gain -> limiter ----
  * 42 dB of mic gain amplifies room rumble along with speech; a 120 Hz
@@ -129,19 +221,18 @@ static void do_record(uint8_t flags)
     }
 
     vmsg_writer_t *w = vmsg_writer_open(OUTBOX_DIR "/rec_tmp.vmsg");
-    if (!w || esp_codec_dev_open(s_mic, &s_fs) != 0) {
+    if (!w || mic_open() != 0) {
         if (w) vmsg_writer_close(w, 0);
         if (s_ev.record_done) s_ev.record_done(0);
         return;
     }
-    esp_codec_dev_set_in_gain(s_mic, MIC_GAIN_DB);
 
     int16_t pcm[VMSG_FRAME_SAMPLES];
 
     /* the codec pops on power-up; drop the first 40 ms so the message
      * doesn't start with a click at near-full-scale */
     for (int i = 0; i < 2; i++)
-        esp_codec_dev_read(s_mic, pcm, sizeof(pcm));
+        mic_read(pcm, VMSG_FRAME_SAMPLES);
     rec_dsp_reset();
 
     uint32_t frames = 0;
@@ -169,7 +260,7 @@ static void do_record(uint8_t flags)
         }
         if (frames >= max_frames) break;
 
-        if (esp_codec_dev_read(s_mic, pcm, sizeof(pcm)) != 0) break;
+        if (!mic_read(pcm, VMSG_FRAME_SAMPLES)) break;
         if (yes_ep) memcpy(raw, pcm, sizeof(raw));
         rec_dsp(pcm, VMSG_FRAME_SAMPLES);
         if (flags & AF_VAD) {
@@ -354,16 +445,15 @@ static void do_listen(void)
             return;
         }
     }
-    if (esp_codec_dev_open(s_mic, &s_fs) != 0) {
+    if (mic_open() != 0) {
         ESP_LOGW(TAG, "listen: mic open failed");
         vTaskDelay(pdMS_TO_TICKS(1000));
         return;
     }
-    esp_codec_dev_set_in_gain(s_mic, MIC_GAIN_DB);
 
     int16_t pcm[VMSG_FRAME_SAMPLES / 2];        /* one 10 ms hop */
     for (int i = 0; i < 4; i++)                 /* power-up pop */
-        esp_codec_dev_read(s_mic, pcm, sizeof(pcm));
+        mic_read(pcm, VMSG_FRAME_SAMPLES / 2);
     voice_infer_reset();
 
     for (;;) {
@@ -379,7 +469,7 @@ static void do_listen(void)
             esp_codec_dev_close(s_mic);
             return;
         }
-        if (esp_codec_dev_read(s_mic, pcm, sizeof(pcm)) != 0) {
+        if (!mic_read(pcm, VMSG_FRAME_SAMPLES / 2)) {
             esp_codec_dev_close(s_mic);
             vTaskDelay(pdMS_TO_TICKS(1000));
             return;
