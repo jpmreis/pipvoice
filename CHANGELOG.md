@@ -10,7 +10,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). The release
 workflow copies a version's section into the GitHub Release notes, so
 write entries for humans.
 
-## [Unreleased]
+## [1.3.12] — 2026-09-15
 
 Server and firmware hardening from a security audit (2026-09-15).
 No PWA changes; nothing a family member will notice.
