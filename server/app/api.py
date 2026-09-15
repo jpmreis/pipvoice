@@ -140,7 +140,10 @@ def login_password(request: Request, email: str = Form(...),
     if not u or not u["password_hash"] \
             or not verify_password(password, u["password_hash"]):
         login_failed(rl_key)
-        stats.event("login.fail", dim="pwa", user_id=u["id"] if u else None)
+        if u:                      # unknown address: counter only (see verify_code)
+            stats.event("login.fail", dim="pwa", user_id=u["id"])
+        else:
+            stats.count("login.fail", "pwa")
         raise HTTPException(401, "wrong email or password")
     login_succeeded(rl_key)
     stats.event("login.ok", dim="pwa", user_id=u["id"], detail="password")
@@ -148,12 +151,17 @@ def login_password(request: Request, email: str = Form(...),
 
 
 @router.post("/auth/request-code")
-def request_code(request: Request, email: str = Form(...)):
+def request_code(request: Request, background: BackgroundTasks,
+                 email: str = Form(...)):
     """Email a 6-digit login code. The response is identical whether or not
-    the address matches a user - no account enumeration."""
+    the address matches a user - no account enumeration. That includes
+    timing: the SMTP round trip runs after the response (BackgroundTasks),
+    since a synchronous send took hundreds of ms only for real addresses.
+    Blocked requests are counted, never logged as events: an event is a
+    DB write, and a flood must not turn into one write per request."""
     rl_key = f"code-req:{client_ip(request)}"
     if login_blocked(rl_key):
-        stats.event("login.blocked", dim="pwa")
+        stats.count("login.blocked", "pwa")
         raise HTTPException(429, "too many attempts - try again later")
     login_failed(rl_key)             # every send counts toward the 5/15min cap
     u = user_by_email(email)
@@ -166,8 +174,8 @@ def request_code(request: Request, email: str = Form(...)):
     # the response must not say whether the address exists.
     if u and not login_blocked(f"code-user:{u['id']}"):
         login_failed(f"code-user:{u['id']}")
-        emails.send_login_code(u["id"], u["display_name"],
-                               issue_login_code(u["id"]))
+        background.add_task(emails.send_login_code, u["id"],
+                            u["display_name"], issue_login_code(u["id"]))
     return {"ok": True}
 
 
@@ -177,20 +185,28 @@ def verify_code(request: Request, email: str = Form(...),
     addr = email.strip().lower()
     rl_key = f"code-ver:{client_ip(request)}:{addr}"
     if login_blocked(rl_key):
-        stats.event("login.blocked", dim="pwa")
+        stats.count("login.blocked", "pwa")
         raise HTTPException(429, "too many attempts - try again later")
     u = user_by_email(addr)
     if not u or not redeem_login_code(u["id"], code):
         login_failed(rl_key)
-        stats.event("login.fail", dim="pwa", user_id=u["id"] if u else None)
+        # the key carries the submitted address, so an unknown address
+        # is never rate limited (each is a fresh key, bounded only by the
+        # dict cap); it gets a counter, not an event row - one INSERT per
+        # request from a single IP would be a write-lock DoS on SQLite
+        if u:
+            stats.event("login.fail", dim="pwa", user_id=u["id"])
+        else:
+            stats.count("login.fail", "pwa")
         raise HTTPException(401, "wrong or expired code")
     login_succeeded(rl_key)
     stats.event("login.ok", dim="pwa", user_id=u["id"], detail="code")
     return _login_response(u)
 
 
-# conservative shape check; the real cap is the parameterized INSERT
-_EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
+# conservative shape check; the real cap is the parameterized INSERT.
+# Also what the admin user form accepts (admin.py).
+EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
 
 
 def _waitlist_notify_admins(addr: str) -> None:
@@ -226,7 +242,7 @@ def waitlist_join(request: Request, background: BackgroundTasks,
         raise HTTPException(429, "too many attempts - try again later")
     login_failed(rl_key)             # every submit counts toward the cap
     addr = email.strip().lower()
-    if len(addr) > 254 or not _EMAIL_RE.fullmatch(addr):
+    if len(addr) > 254 or not EMAIL_RE.fullmatch(addr):
         raise HTTPException(400, "not a valid email address")
     with db.conn() as c:
         new = c.execute("INSERT OR IGNORE INTO waitlist (email) VALUES (?)",
@@ -535,7 +551,15 @@ def managed_add(device_id: str, ident: Identity = AuthDep,
                 body: dict = Body(...)):
     """Add a contact by exact @username (typed, never picked from a list).
     Invalid tries are rate limited so the endpoint can't be used to fish
-    for usernames."""
+    for usernames.
+
+    Consent rule: the device admin may only introduce their box to people
+    who already talk with THEM (a perms row admin->target), or to
+    themselves. Adding a contact writes symmetric perms, so without this
+    any device admin could make their box message any account on the
+    server by guessing a username - on the hosted instance that is a
+    stranger's family. Who talks with whom is the server admin's matrix;
+    this endpoint only extends it to a box."""
     rl_key = f"addcontact:{ident.user_id}"
     if login_blocked(rl_key):
         raise HTTPException(429, "too many attempts - try again later")
@@ -550,6 +574,13 @@ def managed_add(device_id: str, ident: Identity = AuthDep,
         if target["id"] == dev["user_id"]:
             login_failed(rl_key)
             raise HTTPException(400, "that is this device's own @username")
+        if target["id"] != ident.user_id and not db.one(
+                c, "SELECT 1 FROM perms WHERE sender=? AND recipient=?",
+                (ident.user_id, target["id"])):
+            login_failed(rl_key)
+            raise HTTPException(403, "you can only add people who already "
+                                     "exchange messages with you - ask the "
+                                     "server admin to connect you first")
         existed = db.one(c, "SELECT 1 FROM perms WHERE sender=? AND recipient=?",
                          (dev["user_id"], target["id"])) is not None
         c.execute("INSERT OR IGNORE INTO perms VALUES (?,?)",
@@ -737,6 +768,21 @@ def _write_audio(msg_id: str, data: bytes) -> None:
         f.write(data)
 
 
+# Uploads in progress, (sender, recipient) -> n. The per-pair send cap is
+# checked against the messages table before the audio is even read, and
+# the row only lands after the transcode: without this, N concurrent
+# uploads all pass the check and each one runs ffmpeg + opus in the
+# thread pool while holding a few MB. In-memory, single worker (like the
+# rate limiter and presence). Touched only between awaits of the async
+# handler, so no lock.
+_inflight: dict[tuple[int, int], int] = {}
+MAX_INFLIGHT_PER_SENDER = 2     # a client sends one recording at a time
+
+
+def _inflight_for(user_id: int) -> int:
+    return sum(n for (s, _), n in _inflight.items() if s == user_id)
+
+
 @router.post("/messages")
 async def send_message(bg: BackgroundTasks,
                        ident: Identity = AuthDep,
@@ -761,12 +807,31 @@ async def send_message(bg: BackgroundTasks,
                                WHERE sender=? AND recipient=?
                                  AND created > datetime('now','-{RATE_WINDOW_MIN} minutes')""",
                         (ident.user_id, rcpt["id"]))["n"]
-        if recent >= RATE_MSGS:
+        pair = (ident.user_id, rcpt["id"])
+        if recent + _inflight.get(pair, 0) >= RATE_MSGS:
             raise HTTPException(
                 429, f"wait {RATE_WINDOW_MIN} mins before sending this "
                      f"contact a new message (max {RATE_MSGS} per "
                      f"{RATE_WINDOW_MIN} mins)")
+        if _inflight_for(ident.user_id) >= MAX_INFLIGHT_PER_SENDER:
+            raise HTTPException(429, "another message is still uploading - "
+                                     "wait for it to finish")
+    # reserved: from here to the row insert this upload counts toward
+    # both caps, whatever happens to it
+    _inflight[pair] = _inflight.get(pair, 0) + 1
+    try:
+        return await _ingest(bg, ident, rcpt["id"], recipient_id, duration,
+                             audio)
+    finally:
+        left = _inflight[pair] - 1
+        if left:
+            _inflight[pair] = left
+        else:
+            del _inflight[pair]
 
+
+async def _ingest(bg: BackgroundTasks, ident: Identity, rcpt_id: int,
+                  recipient_id: str, duration: int, audio: UploadFile):
     data = await audio.read()
     if len(data) > MAX_AUDIO_BYTES:
         raise HTTPException(413, "audio too large")
@@ -802,17 +867,17 @@ async def send_message(bg: BackgroundTasks,
     with db.conn() as c:
         c.execute("""INSERT INTO messages (id,sender,recipient,duration)
                      VALUES (?,?,?,?)""",
-                  (msg_id, ident.user_id, rcpt["id"], duration))
+                  (msg_id, ident.user_id, rcpt_id, duration))
     stats.event("msg.sent", dim="box" if ident.device_id else "phone",
                 user_id=ident.user_id, device_id=ident.device_id,
                 msg_id=msg_id, value=duration, detail=recipient_id)
     stats.count("user.sent", ident.user_id)
-    stats.count("user.recv", rcpt["id"])
+    stats.count("user.recv", rcpt_id)
     # After the response, in a worker thread: notifying means a webpush per
     # subscription at up to 10 s each, and the sender has no reason to wait
     # on it. The audio and the row are already in place, so the promise a
     # notify makes still holds the moment it fires.
-    bg.add_task(notify.message_created, rcpt["id"], msg_id,
+    bg.add_task(notify.message_created, rcpt_id, msg_id,
                 ident.display_name)
     return {"id": msg_id}
 

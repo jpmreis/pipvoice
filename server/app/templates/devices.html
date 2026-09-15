@@ -17,9 +17,18 @@
 <td class="muted">{{ d.created[:10] }}</td>
 <td class="muted">{{ d.last_seen or "never" }}</td>
 <td><form method="post" action="/admin/devices/{{ d.id }}/delete"
-onsubmit="return confirm('Revoke {{ d.id }}? Its token stops working immediately.')">
+class="revoke" data-id="{{ d.id }}">
 <button style="background:var(--bad);color:#fff">Revoke</button></form></td></tr>{% endfor %}
 </table></div>
+<script nonce="{{ csp_nonce }}">
+// the confirm lives here, not in an onsubmit= attribute: the CSP (main.py)
+// blocks inline handlers, which silently made Revoke a one-click action
+for (const f of document.querySelectorAll("form.revoke"))
+  f.addEventListener("submit", (e) => {
+    if (!confirm(`Revoke ${f.dataset.id}? Its token stops working immediately.`))
+      e.preventDefault();
+  });
+</script>
 <p class="muted">The device admin manages this device's contact list from
 their own PWA (Settings &rarr; Manage device). Voice control is the
 hands-free accessibility mode ("Hey Pip"): the box wakes on the phrase,

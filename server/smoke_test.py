@@ -40,6 +40,13 @@ for u, n, col in [("ella", "Ella", "F06292"), ("grandma", "Grandma", "BA68C8")]:
                                      "color": col,
                                      "email": u + "@example.com"})
     ok(r.status_code == 303, f"user {u} created")
+for bad in ({"username": "Bad Name", "display_name": "X", "color": "F06292"},
+            {"username": "okay", "display_name": "X", "color": "red"},
+            {"username": "okay", "display_name": "X", "color": "F06292",
+             "email": "not an address"},
+            {"username": "ella", "display_name": "Dup", "color": "F06292"}):
+    ok(c.post("/admin/users", data=bad).status_code in (400, 409),
+       f"admin user form rejects {list(bad.values())[0]!r}")
 
 # --- permissions: ella <-> grandma both ways (ids 2 and 3) ---
 r = c.post("/admin/perms", data={"p_2_3": "on", "p_3_2": "on"})
@@ -116,6 +123,15 @@ ok(any(x["device_id"] == "pip-ella-01" and x["voice"] is True
 r = c.post("/v1/managed/pip-ella-01/voice", json={"on": False})
 ok(r.status_code == 200 and r.json()["voice"] is False,
    "device admin turns voice off")
+# consent rule: a device admin may only add people who already talk
+# with THEM (or themselves); papa has no perms row to grandma here
+r = c.post("/v1/managed/pip-ella-01/contacts", json={"username": "grandma"})
+ok(r.status_code == 403, "device admin cannot add a stranger as box contact")
+r = c.post("/v1/managed/pip-ella-01/contacts", json={"username": "@papa"})
+ok(r.status_code == 200 and r.json()["existed"] is False,
+   "device admin can add themselves as box contact")
+r = c.delete("/v1/managed/pip-ella-01/contacts/papa")
+ok(r.status_code == 200, "device admin removes a box contact")
 r = c.get("/v1/device", headers=H_E)
 ok({k: r.json()[k] for k in ("voice", "prompts")} == {"voice": False, "prompts": []},
    "voice off again: config reflects it")

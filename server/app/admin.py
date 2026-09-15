@@ -5,7 +5,8 @@ import re
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (APIRouter, BackgroundTasks, Form, HTTPException, Query,
+                     Request, UploadFile)
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -49,13 +50,14 @@ def login_page(request: Request):
 
 
 @router.post("/login")
-def login_post(request: Request, action: str = Form(...),
+def login_post(request: Request, background: BackgroundTasks,
+               action: str = Form(...),
                email: str = Form(""), code: str = Form(""),
                username: str = Form(""), display_name: str = Form(""),
                password: str = Form("")):
     rl_key = f"admin-code:{client_ip(request)}"
     if login_blocked(rl_key):
-        stats.event("login.blocked", dim="admin")
+        stats.count("login.blocked", "admin")   # counter: no write per hit
         return _page(request, "login.html", bootstrap=False, stage="email",
                      email="",
                      error="Too many attempts - try again in 15 minutes")
@@ -108,8 +110,10 @@ def login_post(request: Request, action: str = Form(...),
         # per-account cap on top of the per-IP one (see api.request_code)
         if u and u["is_admin"] and not login_blocked(f"code-user:{u['id']}"):
             login_failed(f"code-user:{u['id']}")
-            emails.send_login_code(u["id"], u["display_name"],
-                                   issue_login_code(u["id"]))
+            # after the response: the SMTP round trip must not make a
+            # matching address answer slower than a miss (api.request_code)
+            background.add_task(emails.send_login_code, u["id"],
+                                u["display_name"], issue_login_code(u["id"]))
         # identical response whether or not the address matched an admin
         return _page(request, "login.html", bootstrap=False, stage="code",
                      email=email, error=None)
@@ -481,26 +485,55 @@ def users_page(request: Request, ident: Identity = AdminDep):
                  sent=request.query_params.get("sent"))
 
 
+# The same shapes the PWA setup flow enforces (provision.create_device_user):
+# a username names voice-prompt files and MQTT/JSON fields, a display
+# name rides in the fixed-size device notify, a color lands in style
+# attributes - the admin form is trusted input, but not free-form input.
+USERNAME_RE = re.compile(r"[a-z0-9_]{2,24}")
+COLOR_RE = re.compile(r"[0-9A-F]{6}")
+MAX_DISPLAY_NAME = 40
+
+
+def _clean_email(email: str):
+    addr = email.strip().lower()
+    if not addr:
+        return None
+    if len(addr) > 254 or not api.EMAIL_RE.fullmatch(addr):
+        raise HTTPException(400, "not a valid email address")
+    return addr
+
+
 @router.post("/users")
 def users_create(ident: Identity = AdminDep, username: str = Form(...),
                  display_name: str = Form(...), color: str = Form("4FC3F7"),
                  email: str = Form(""), is_admin: str = Form(None)):
+    username = username.strip().lower()
+    display_name = display_name.strip()
+    color = color.strip().lstrip("#").upper()
+    if not USERNAME_RE.fullmatch(username):
+        raise HTTPException(400, "username must be 2-24 characters: a-z, 0-9, _")
+    if not 1 <= len(display_name) <= MAX_DISPLAY_NAME:
+        raise HTTPException(400, f"display name must be 1-{MAX_DISPLAY_NAME} "
+                                 "characters")
+    if not COLOR_RE.fullmatch(color):
+        raise HTTPException(400, "color must be 6 hex digits")
+    addr = _clean_email(email)
     with db.conn() as c:
+        if db.one(c, "SELECT 1 FROM users WHERE username=?", (username,)):
+            raise HTTPException(409, "that username is taken")
         c.execute("""INSERT INTO users
                      (username,display_name,color,password_hash,email,is_admin)
                      VALUES (?,?,?,'',?,?)""",
-                  (username.strip().lower(), display_name,
-                   color.lstrip("#").upper(),
-                   email.strip().lower() or None, 1 if is_admin else 0))
+                  (username, display_name, color, addr, 1 if is_admin else 0))
     return RedirectResponse("/admin/users", status_code=303)
 
 
 @router.post("/users/{user_id}/email")
 def users_set_email(user_id: int, ident: Identity = AdminDep,
                     email: str = Form("")):
+    addr = _clean_email(email)
     with db.conn() as c:
-        c.execute("UPDATE users SET email=? WHERE id=?",
-                  (email.strip().lower() or None, user_id))
+        c.execute("UPDATE users SET email=? WHERE id=?", (addr, user_id))
     return RedirectResponse("/admin/users", status_code=303)
 
 

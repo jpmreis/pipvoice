@@ -2,6 +2,9 @@
 # Nightly backup: DB snapshot + audio. Add to root crontab:
 #   15 3 * * * /opt/pip/scripts/backup.sh
 set -euo pipefail
+# every archive holds private data (the DB: emails + token hashes; audio:
+# every message on the server) - nothing here may be group/world readable
+umask 077
 DEST=/opt/pipvoice/backups
 mkdir -p "$DEST"
 STAMP=$(date +%F)

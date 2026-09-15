@@ -148,9 +148,10 @@ async def _stamp_version(request, call_next):
             stats.event("http.error", dim=group,
                         detail=f"{request.method} {group} {resp.status_code}")
         elif resp.status_code == 429:
+            # a counter, not an event: an event is a DB write, and a
+            # client past its limit must not cost one write per request
             stats.count("req.status", "4xx")
-            stats.event("http.ratelimit", dim=group,
-                        detail=f"{request.method} {group}")
+            stats.count("http.ratelimit", group)
         elif resp.status_code >= 400:
             stats.count("req.status", "4xx")
     resp.headers[CSP_HEADER] = _csp(request.state.csp_nonce)

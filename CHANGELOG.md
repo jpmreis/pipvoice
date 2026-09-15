@@ -12,7 +12,42 @@ write entries for humans.
 
 ## [Unreleased]
 
+Server hardening, round three (audit of 2026-09-15, evening). Server
+only; nothing a family member will notice.
+
 ### Fixed
+- A device admin could add ANY @username on the server as a contact of
+  their box, which writes symmetric permissions - on the hosted
+  instance, a way to message a stranger's family by guessing a
+  username. The box can now only be introduced to people who already
+  exchange messages with the device admin (or to the admin themselves);
+  the server admin's permissions matrix stays the source of who talks
+  with whom.
+- Login endpoints no longer write an analytics event per request from
+  a client past its rate limit, or per guess against an address that
+  matches no account: SQLite has a single writer, and a flood from one
+  IP could keep every box's request waiting on it. Those cases are
+  counted (the analytics tiles are unchanged) but not logged.
+- The login-code email is sent after the response instead of during
+  it: a matching address used to answer hundreds of milliseconds slower
+  than a miss (the SMTP round trip), which told an attacker whether an
+  email belongs to a family member. Admin login too.
+- The per-contact send cap could be bypassed with concurrent uploads:
+  it was checked before the audio was read and only enforced by the
+  row written after the transcode, so N uploads fired together all
+  passed and each ran ffmpeg + Opus while holding a few MB. Uploads in
+  progress now count toward the cap, and a sender has at most two in
+  flight.
+- Admin "Revoke" on the Devices page had lost its confirmation: the
+  prompt was an inline `onsubmit=` handler, which the enforced CSP
+  (1.3.12) silently blocks, so one click revoked a box. Moved to a
+  nonced script.
+- The admin "Add user" form validates its fields like the PWA setup
+  flow does (username `a-z0-9_`, 2-24; display name 1-40; color 6 hex
+  digits; email shape). A username was used verbatim in voice-prompt
+  file names and a color in style attributes.
+- `backup.sh` sets `umask 077`: the DB snapshot and audio archive were
+  created world-readable (only the config tarball was chmod 600).
 - Docker: the mosquitto entrypoint hung on "waiting for Caddy to obtain
   the certificate" after a host reboot, because a restarted (not
   recreated) container already held the copied cert and the wait loop
