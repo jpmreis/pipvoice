@@ -10,6 +10,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). The release
 workflow copies a version's section into the GitHub Release notes, so
 write entries for humans.
 
+## [Unreleased]
+
+### Fixed
+- Docker: the mosquitto entrypoint hung on "waiting for Caddy to obtain
+  the certificate" after a host reboot, because a restarted (not
+  recreated) container already held the copied cert and the wait loop
+  treated "unchanged" as "missing". The broker was down for about half
+  an hour after the first reboot of the Docker stack; it now waits for
+  the cert to exist, then syncs.
+
 ## [1.3.12] — 2026-09-15
 
 Server and firmware hardening from a security audit (2026-09-15).
