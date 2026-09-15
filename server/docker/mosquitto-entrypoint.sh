@@ -38,8 +38,15 @@ sync_certs() {   # returns 0 when the cert changed
     return 1
 }
 
+# Wait for the cert to EXIST, then copy it if it differs. sync_certs alone
+# is the wrong test here: it reports "unchanged" as failure, and a
+# container restarted by the docker daemon (host reboot) keeps its
+# writable layer, so the copy from the previous run is already in place
+# and an until-sync_certs loop never ends - the broker sat down for half
+# an hour after the first reboot of the Docker stack (2026-09-15).
 echo "waiting for Caddy to obtain the ${DOMAIN} certificate..."
-until sync_certs; do sleep 5; done
+until [ -n "$(find_cert)" ]; do sleep 5; done
+sync_certs || true
 echo "certificate ready, starting mosquitto"
 
 mosquitto -c /pip/mosquitto.conf &
