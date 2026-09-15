@@ -12,6 +12,8 @@ typedef struct {
     void (*contacts_changed)(void);
     void (*themes_changed)(void);                /* background theme list   */
     void (*reactions_changed)(void);             /* sender-side badges      */
+    void (*send_refused)(const char *text);      /* outbox item dropped
+                                                    (server said no)      */
 } sync_events_t;
 
 /* ---- quiet hours: incoming mail is held on the server overnight ----
@@ -58,6 +60,17 @@ const ui_theme_info_t *sync_themes(uint8_t *count);
 /* mark a contact as just-used (send or receive): resorts the list
  * newest-first, persists, and fires contacts_changed */
 void sync_touch_contact(const char *contact_id);
+
+/* ---- send cap (the server's per-contact rate limit, mirrored) ----
+ * The server refuses more than N messages to one contact within a window
+ * (429). The box counts its own sends so the user is told to wait before
+ * recording instead of after; the numbers come from GET /device (built-in
+ * defaults until then). Counts live in RAM: after a reboot the server's
+ * 429 is the backstop, and it re-arms the local block for the window.
+ * sync_send_allowed() fills `why` with the toast text when it says no.
+ * Both are safe from the LVGL and voice tasks. */
+bool sync_send_allowed(const char *contact_id, char *why, size_t cap);
+void sync_note_sent(const char *contact_id);
 
 /* unseen reactions to this user's sent messages, latest per contact
  * (cached across boots like contacts) */

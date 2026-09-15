@@ -157,7 +157,10 @@ static void step_record(void)
     VUI(ui_voice_show("Recording for", c->name));
     audio_play_chime(CHIME_PROMPT);        /* audible "go" - queued ahead
                                               of the record command       */
-    s_app.record_start(c->id);
+    if (!s_app.record_start(c->id))       /* send cap: the toast is up
+                                              (it outlives the screen);
+                                              end the session */
+        session_end();
 }
 
 static void step_wake(void)

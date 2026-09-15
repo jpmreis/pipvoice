@@ -81,7 +81,8 @@ typedef struct {
 /* ---- UI -> app callbacks (all invoked from the LVGL task) ---- */
 typedef struct {
     /* recording */
-    void (*record_start)(const char *contact_id);
+    bool (*record_start)(const char *contact_id); /* false = refused
+                                               (error shown), stay idle */
     void (*record_stop)(void);              /* stop capture, keep buffer   */
     bool (*record_send)(void);              /* queue buffered msg to outbox;
                                                false = not sent (error shown) */

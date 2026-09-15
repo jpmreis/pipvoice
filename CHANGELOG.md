@@ -12,6 +12,26 @@ write entries for humans.
 
 ## [Unreleased]
 
+## [1.3.11] — 2026-09-15
+
+The box now tells you when a message can't be sent, instead of quietly
+holding on to it.
+
+### Changed
+- Send cap (5 messages per contact per 5 minutes) is now visible on the
+  box. The server tells each box the limit in `GET /device`, the box
+  counts its own sends, and pressing record inside the window shows
+  "Wait 5 mins before sending NAME a new message" instead of starting a
+  recording (touch and voice flows). If a message still reaches the
+  server over the cap (counts are lost on reboot), the box drops it and
+  shows the same toast, instead of the old silent retry that delivered
+  it minutes later and held up the rest of the outbox. The PWA toast
+  uses the same wording.
+- A message the server rejects outright (permission revoked, contact
+  removed, recording too large) is likewise dropped with a "Could not
+  send to NAME" toast. It used to be retried forever and blocked every
+  later message in the outbox.
+
 ## [1.3.10] — 2026-09-13
 
 Voice tuning for the round board, from its first bench session.

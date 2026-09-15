@@ -82,7 +82,9 @@ static void rec_clicked(lv_event_t *e)
 {
     LV_UNUSED(e);
     if (s_state == REC_IDLE) {
-        if (g_ui.cb.record_start) g_ui.cb.record_start(g_ui.selected_contact_id);
+        /* refused (send cap): the callback showed why; stay idle */
+        if (g_ui.cb.record_start &&
+            !g_ui.cb.record_start(g_ui.selected_contact_id)) return;
         apply_state(REC_RECORDING);
     } else if (s_state == REC_RECORDING) {
         if (g_ui.cb.record_stop) g_ui.cb.record_stop();

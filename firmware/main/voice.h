@@ -16,7 +16,8 @@
 
 /* app_main-provided actions (the same code paths the touch UI uses) */
 typedef struct {
-    void (*record_start)(const char *contact_id);  /* VAD auto-stop mode */
+    bool (*record_start)(const char *contact_id);  /* VAD auto-stop mode;
+                                                      false = refused    */
     bool (*record_send)(void);
     void (*record_cancel)(void);
     void (*mark_heard)(const char *msg_id);

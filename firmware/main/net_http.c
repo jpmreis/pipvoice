@@ -193,11 +193,11 @@ bool http_download_theme_thumb(const char *name, const char *dest_path)
 }
 
 /* ---------------- upload (multipart) ---------------- */
-bool http_upload_message(const char *vmsg_path, const char *recipient_id,
-                         uint16_t duration_s)
+int http_upload_message(const char *vmsg_path, const char *recipient_id,
+                        uint16_t duration_s)
 {
     FILE *f = fopen(vmsg_path, "rb");
-    if (!f) return false;
+    if (!f) return 0;
     struct stat st;
     stat(vmsg_path, &st);
 
@@ -212,13 +212,13 @@ bool http_upload_message(const char *vmsg_path, const char *recipient_id,
     int tail_len = snprintf(tail, sizeof(tail), "\r\n--%s--\r\n", bound);
 
     esp_http_client_handle_t c = client_new("/messages", NULL, HTTP_METHOD_POST);
-    if (!c) { fclose(f); return false; }
+    if (!c) { fclose(f); return 0; }
     char ctype[64];
     snprintf(ctype, sizeof(ctype), "multipart/form-data; boundary=%s", bound);
     esp_http_client_set_header(c, "Content-Type", ctype);
 
     int total = head_len + (int)st.st_size + tail_len;
-    bool ok = false;
+    int status = 0;
     if (esp_http_client_open(c, total) == ESP_OK) {
         esp_http_client_write(c, head, head_len);
         char buf[1024];
@@ -226,15 +226,15 @@ bool http_upload_message(const char *vmsg_path, const char *recipient_id,
         while ((r = fread(buf, 1, sizeof(buf), f)) > 0)
             esp_http_client_write(c, buf, (int)r);
         esp_http_client_write(c, tail, tail_len);
-        esp_http_client_fetch_headers(c);
-        int status = esp_http_client_get_status_code(c);
-        ok = (status >= 200 && status < 300);
-        if (!ok) ESP_LOGW(TAG, "upload -> %d", status);
+        if (esp_http_client_fetch_headers(c) >= 0)
+            status = esp_http_client_get_status_code(c);
+        if (status < 200 || status >= 300)
+            ESP_LOGW(TAG, "upload -> %d", status);
         esp_http_client_close(c);
     }
     fclose(f);
     esp_http_client_cleanup(c);
-    return ok;
+    return status;
 }
 
 /* ---------------- inbox list ---------------- */
@@ -426,7 +426,7 @@ bool http_get_reactions(ui_reaction_t *out, uint8_t cap, uint8_t *count)
 }
 
 /* ---------------- per-device config (voice control) ---------------- */
-bool http_get_device_config(bool *voice_enabled, http_prompt_t *out,
+bool http_get_device_config(http_device_cfg_t *cfg, http_prompt_t *out,
                             uint8_t cap, uint8_t *count)
 {
     esp_http_client_handle_t c = client_new("/device", NULL, HTTP_METHOD_GET);
@@ -442,7 +442,18 @@ bool http_get_device_config(bool *voice_enabled, http_prompt_t *out,
 
     cJSON *root = cJSON_Parse(body);
     if (!root) return false;
-    *voice_enabled = cJSON_IsTrue(cJSON_GetObjectItem(root, "voice"));
+    cfg->voice_enabled = cJSON_IsTrue(cJSON_GetObjectItem(root, "voice"));
+    cfg->rate_msgs = 0;              /* absent on a server older than this */
+    cfg->rate_window_min = 0;
+    const cJSON *rate = cJSON_GetObjectItem(root, "rate");
+    if (cJSON_IsObject(rate)) {
+        const cJSON *m = cJSON_GetObjectItem(rate, "msgs");
+        const cJSON *w = cJSON_GetObjectItem(rate, "window_min");
+        if (cJSON_IsNumber(m) && m->valueint > 0 && m->valueint < 256)
+            cfg->rate_msgs = (uint8_t)m->valueint;
+        if (cJSON_IsNumber(w) && w->valueint > 0 && w->valueint < 65536)
+            cfg->rate_window_min = (uint16_t)w->valueint;
+    }
     uint8_t n = 0;
     const cJSON *list = cJSON_GetObjectItem(root, "prompts");
     const cJSON *item;

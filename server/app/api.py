@@ -358,7 +358,10 @@ def device_config(ident: Identity = AuthDep):
         # phrase) off-thread; the box is notified when new clips land
         voice.ensure_user(ident.user_id)
     return {"voice": enabled,
-            "prompts": voice.manifest(ident.user_id) if enabled else []}
+            "prompts": voice.manifest(ident.user_id) if enabled else [],
+            # the send cap below, so the box can refuse a recording up
+            # front instead of learning about it from a 429 after the fact
+            "rate": {"msgs": RATE_MSGS, "window_min": RATE_WINDOW_MIN}}
 
 
 @router.get("/voice/{key}.vmsg")
@@ -704,16 +707,19 @@ async def send_message(bg: BackgroundTasks,
                          (ident.user_id, rcpt["id"]))
         if not allowed:
             raise HTTPException(403, "not permitted to message this user")
-        # checked before the audio is even read; a 429'd device upload stays
-        # in its outbox and retries after the window, so nothing is lost
+        # checked before the audio is even read. Both clients tell the
+        # user to wait and drop the message: the box also counts its own
+        # sends (limits come from GET /device) so it normally refuses to
+        # record at all rather than reaching this.
         recent = db.one(c, f"""SELECT COUNT(*) n FROM messages
                                WHERE sender=? AND recipient=?
                                  AND created > datetime('now','-{RATE_WINDOW_MIN} minutes')""",
                         (ident.user_id, rcpt["id"]))["n"]
         if recent >= RATE_MSGS:
             raise HTTPException(
-                429, f"max {RATE_MSGS} messages per contact "
-                     f"per {RATE_WINDOW_MIN} minutes")
+                429, f"wait {RATE_WINDOW_MIN} mins before sending this "
+                     f"contact a new message (max {RATE_MSGS} per "
+                     f"{RATE_WINDOW_MIN} mins)")
 
     data = await audio.read()
     if len(data) > MAX_AUDIO_BYTES:

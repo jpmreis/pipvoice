@@ -46,13 +46,26 @@ static void reload_inbox_ui(void)
 }
 
 /* ================= UI -> app ================= */
-static void cb_record_start(const char *contact_id)
+/* the server caps messages per contact per window; refuse up front (with
+ * the same toast the PWA shows) rather than record something that would
+ * be dropped on upload */
+static bool send_cap_ok(const char *contact_id)
 {
+    char why[96];
+    if (sync_send_allowed(contact_id, why, sizeof(why))) return true;
+    UI_LOCKED(ui_flash_error(why));
+    return false;
+}
+
+static bool cb_record_start(const char *contact_id)
+{
+    if (!send_cap_ok(contact_id)) return false;
     strlcpy(s_rec_recipient, contact_id, sizeof(s_rec_recipient));
     power_hold(true);
     audio_record_start();
     /* non-blocking enqueue, not a network call: allowed here */
     net_mqtt_publish_presence(s_rec_recipient, true);
+    return true;
 }
 
 static void cb_record_stop(void)
@@ -82,6 +95,7 @@ static bool cb_record_send(void)
         return false;
     }
     storage_outbox_meta_write(uuid, s_rec_recipient, s_rec_duration);
+    sync_note_sent(s_rec_recipient);
     sync_touch_contact(s_rec_recipient);
     sync_kick();
     audio_play_chime(CHIME_SENT);
@@ -90,12 +104,14 @@ static bool cb_record_send(void)
 
 /* voice-flow twins of the record callbacks: same recipient/presence
  * bookkeeping, but the capture auto-stops on trailing silence */
-static void cb_voice_record_start(const char *contact_id)
+static bool cb_voice_record_start(const char *contact_id)
 {
+    if (!send_cap_ok(contact_id)) return false;
     strlcpy(s_rec_recipient, contact_id, sizeof(s_rec_recipient));
     power_hold(true);
     audio_record_start_vad();
     net_mqtt_publish_presence(s_rec_recipient, true);
+    return true;
 }
 
 static void cb_record_cancel(void)
@@ -234,6 +250,13 @@ static void ev_play_done(void)
 }
 
 static void ev_inbox_changed(void) { reload_inbox_ui(); }
+
+static void ev_send_refused(const char *text)
+{
+    static char msg[96];
+    strlcpy(msg, text, sizeof(msg));
+    UI_LOCKED(ui_flash_error(msg));
+}
 
 static void ev_new_message(const char *sender)
 {
@@ -503,6 +526,7 @@ void app_main(void)
         .contacts_changed = ev_contacts_changed,
         .themes_changed = ev_themes_changed,
         .reactions_changed = ev_reactions_changed,
+        .send_refused = ev_send_refused,
     };
     sync_init(&sync_ev);
 

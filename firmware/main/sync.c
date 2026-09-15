@@ -34,6 +34,78 @@ static uint8_t           s_contact_count;
 static ui_theme_info_t   s_themes[UI_MAX_THEMES];
 static uint8_t           s_theme_count;
 
+/* ---- send cap: per-contact ring of recent send times (monotonic secs,
+ * +1 so 0 can mean "empty"). Defaults match the server's until GET
+ * /device says otherwise. SEND_TRACK bounds what we can count: a cap
+ * above it never blocks locally (the 429 backstop still applies). */
+#define SEND_TRACK 8
+typedef struct {
+    char     id[UI_ID_LEN];
+    uint32_t ts[SEND_TRACK];
+    uint8_t  head;
+} send_log_t;
+static send_log_t s_sent[UI_MAX_CONTACTS];
+static uint8_t    s_rate_msgs       = 5;
+static uint16_t   s_rate_window_min = 5;
+
+static uint32_t mono_s(void) { return (uint32_t)(esp_timer_get_time() / 1000000) + 1; }
+
+static send_log_t *send_log(const char *contact_id, bool create)
+{
+    send_log_t *empty = NULL;
+    for (uint8_t i = 0; i < UI_MAX_CONTACTS; i++) {
+        if (!strcmp(s_sent[i].id, contact_id)) return &s_sent[i];
+        if (!empty && !s_sent[i].id[0]) empty = &s_sent[i];
+    }
+    if (!create) return NULL;
+    if (!empty) empty = &s_sent[0];      /* more contacts than slots: recycle */
+    memset(empty, 0, sizeof(*empty));
+    strlcpy(empty->id, contact_id, sizeof(empty->id));
+    return empty;
+}
+
+static const char *contact_name(const char *contact_id)
+{
+    for (uint8_t i = 0; i < s_contact_count; i++)
+        if (!strcmp(s_contacts[i].id, contact_id)) return s_contacts[i].name;
+    return "them";
+}
+
+static void send_refused_text(const char *contact_id, char *why, size_t cap)
+{
+    snprintf(why, cap, "Wait %u mins before sending %s a new message",
+             (unsigned)s_rate_window_min, contact_name(contact_id));
+}
+
+bool sync_send_allowed(const char *contact_id, char *why, size_t cap)
+{
+    const send_log_t *l = send_log(contact_id, false);
+    if (!l) return true;
+    uint32_t now = mono_s(), window = (uint32_t)s_rate_window_min * 60;
+    uint8_t recent = 0;
+    for (uint8_t i = 0; i < SEND_TRACK; i++)
+        if (l->ts[i] && now - l->ts[i] < window) recent++;
+    if (recent < s_rate_msgs) return true;
+    if (why) send_refused_text(contact_id, why, cap);
+    return false;
+}
+
+void sync_note_sent(const char *contact_id)
+{
+    send_log_t *l = send_log(contact_id, true);
+    l->ts[l->head] = mono_s();
+    l->head = (l->head + 1) % SEND_TRACK;
+}
+
+/* the server said the window is full: block locally for a whole window
+ * (a reboot lost the counts, or its clock disagrees with ours) */
+static void send_log_fill(const char *contact_id)
+{
+    send_log_t *l = send_log(contact_id, true);
+    uint32_t now = mono_s();
+    for (uint8_t i = 0; i < SEND_TRACK; i++) l->ts[i] = now;
+}
+
 static void contacts_sort(void)
 {
     /* newest-first; ties keep server order (alphabetical). Insertion sort:
@@ -106,16 +178,20 @@ static bool          s_have_manifest;
 
 static void refresh_device_cfg(void)
 {
-    bool ven = false;
+    http_device_cfg_t cfg;
     static http_prompt_t tmp[VOICE_MAX_PROMPTS];
     uint8_t n = 0;
-    if (!http_get_device_config(&ven, tmp, VOICE_MAX_PROMPTS, &n)) return;
+    if (!http_get_device_config(&cfg, tmp, VOICE_MAX_PROMPTS, &n)) return;
     memcpy(s_prompts, tmp, n * sizeof(http_prompt_t));
     s_prompt_count = n;
     s_have_manifest = true;
-    if (ven != g_cfg.voice_enabled) {
-        config_save_voice(ven);
-        voice_set_enabled(ven);
+    if (cfg.rate_msgs && cfg.rate_window_min) {
+        s_rate_msgs = cfg.rate_msgs;
+        s_rate_window_min = cfg.rate_window_min;
+    }
+    if (cfg.voice_enabled != g_cfg.voice_enabled) {
+        config_save_voice(cfg.voice_enabled);
+        voice_set_enabled(cfg.voice_enabled);
     }
 }
 
@@ -328,10 +404,33 @@ static void drain_outbox(void)
             continue;
         }
         ESP_LOGI(TAG, "uploading %s -> %s (%us)", uuid, recipient, dur);
-        if (http_upload_message(path, recipient, dur)) {
+        int status = http_upload_message(path, recipient, dur);
+        if (status >= 200 && status < 300) {
             storage_outbox_delete(uuid);
+        } else if (status == 429) {
+            /* send cap hit (the local pre-check missed it: reboot, or
+             * the last sends were before a clock jump). Not a retry -
+             * the message is dropped and the user told, like the PWA. */
+            ESP_LOGW(TAG, "dropping %s: rate limited", uuid);
+            storage_outbox_delete(uuid);
+            send_log_fill(recipient);
+            char why[96];
+            send_refused_text(recipient, why, sizeof(why));
+            if (s_ev.send_refused) s_ev.send_refused(why);
+        } else if (status >= 400 && status < 500 && status != 401) {
+            /* the server rejected this message for good (permission
+             * revoked = 403, contact gone = 404, too large = 413, ...):
+             * retrying would only wedge everything queued behind it.
+             * 401 is excluded - that is the box's token, not the
+             * message; it keeps waiting like a network fault. */
+            ESP_LOGW(TAG, "dropping %s: server said %d", uuid, status);
+            storage_outbox_delete(uuid);
+            char why[96];
+            snprintf(why, sizeof(why), "Could not send to %s",
+                     contact_name(recipient));
+            if (s_ev.send_refused) s_ev.send_refused(why);
         } else {
-            break;   /* network trouble: retry after next wake/backoff */
+            break;   /* network trouble / 5xx: retry after next wake/backoff */
         }
     }
 }

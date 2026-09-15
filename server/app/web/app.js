@@ -816,7 +816,7 @@ $("prev-send").onclick = async () => {
     home();
   } catch (e) {
     toast(e.status === 429
-      ? `Slow down - ${currentContact.name} has 5 messages from you already`
+      ? `Wait 5 mins before sending ${currentContact.name} a new message`
       : "Send failed - try again", "danger");
   } finally { $("prev-send").disabled = false; }
 };

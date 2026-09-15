@@ -26,7 +26,10 @@ bool http_get_contacts(ui_contact_t *out, uint8_t cap, uint8_t *count);
 bool http_get_themes(ui_theme_info_t *out, uint8_t cap, uint8_t *count);
 bool http_download_theme(const char *name, const char *dest_path);
 bool http_download_theme_thumb(const char *name, const char *dest_path);
-bool http_upload_message(const char *vmsg_path, const char *recipient_id,
+/* POST /messages. Returns the HTTP status (2xx = accepted), or 0 when no
+ * response came back (connection trouble): the caller tells a refusal it
+ * must act on (429) from a retry-later. */
+int  http_upload_message(const char *vmsg_path, const char *recipient_id,
                          uint16_t duration_s);
 bool http_get_inbox(http_inbox_item_t *out, uint8_t cap, uint8_t *count);
 bool http_download_audio(const char *msg_id, const char *dest_path);
@@ -52,10 +55,17 @@ typedef struct {
     char ver[UI_THEME_VER_LEN];  /* 8-hex content hash, like themes     */
 } http_prompt_t;
 
-/* GET /device: the voice-control flag plus the manifest of spoken
- * prompts this device should hold. Old servers 404 -> returns false and
- * nothing changes (fail-safe: the box keeps its NVS-cached flag). */
-bool http_get_device_config(bool *voice_enabled, http_prompt_t *out,
+typedef struct {
+    bool     voice_enabled;
+    uint8_t  rate_msgs;        /* send cap per contact ... (0 = unknown) */
+    uint16_t rate_window_min;  /* ... within this many minutes           */
+} http_device_cfg_t;
+
+/* GET /device: the voice-control flag, the server's per-contact send cap,
+ * plus the manifest of spoken prompts this device should hold. Old
+ * servers 404 -> returns false and nothing changes (fail-safe: the box
+ * keeps its NVS-cached flag). */
+bool http_get_device_config(http_device_cfg_t *cfg, http_prompt_t *out,
                             uint8_t cap, uint8_t *count);
 bool http_download_prompt(const char *key, const char *ver,
                           const char *dest_path);
