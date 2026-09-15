@@ -26,7 +26,7 @@ router = APIRouter(prefix="/v1")
 log = logging.getLogger("api")
 
 MAX_AUDIO_BYTES = 4 * 1024 * 1024
-MAX_MSG_S = int(db.env("MAX_MSG_S", "90"))   # mirrors device max_message_s
+MAX_MSG_S = vmsg.MAX_MSG_S   # mirrors device max_message_s (one home: vmsg.py)
 RATE_MSGS = 5          # per sender->recipient pair ...
 RATE_WINDOW_MIN = 5    # ... within this many minutes
 
@@ -160,7 +160,12 @@ def request_code(request: Request, email: str = Form(...)):
     # logged with the user when the address matched, else anonymous: the
     # response stays identical either way (no enumeration)
     stats.event("login.code", dim="pwa", user_id=u["id"] if u else None)
-    if u:
+    # the same cap again per ACCOUNT: the per-IP one alone lets a crowd of
+    # addresses flood one family member's inbox with codes and replace
+    # their live code faster than they can type it. Silent when hit -
+    # the response must not say whether the address exists.
+    if u and not login_blocked(f"code-user:{u['id']}"):
+        login_failed(f"code-user:{u['id']}")
         emails.send_login_code(u["id"], u["display_name"],
                                issue_login_code(u["id"]))
     return {"ok": True}
@@ -724,6 +729,7 @@ async def send_message(bg: BackgroundTasks,
     data = await audio.read()
     if len(data) > MAX_AUDIO_BYTES:
         raise HTTPException(413, "audio too large")
+    duration = max(0, min(duration, MAX_MSG_S))   # box-declared; keep it sane
     if not data.startswith(b"VMSG"):
         # browser upload (AAC/MP4, WebM/Opus, ...): transcode to the
         # firmware's container; duration is recomputed server-side.
@@ -739,8 +745,14 @@ async def send_message(bg: BackgroundTasks,
     else:
         # box recording: level-normalize at ingest (decode -> gain/limit ->
         # re-encode; see vmsg.normalize_pcm). Same single-worker reasoning
-        # as above. Never fatal - on any failure the original bytes stand.
-        data = await asyncio.to_thread(vmsg.normalize_vmsg, data)
+        # as above. Normalization is never fatal (the original bytes
+        # stand), but a malformed or over-length container is refused -
+        # decoding is what bounds the memory one upload can cost us.
+        try:
+            data = await asyncio.to_thread(vmsg.normalize_vmsg, data,
+                                           MAX_MSG_S)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     # ms-timestamp prefix + random suffix: still 32 hex chars, but ids sort
     # chronologically - device inbox ordering relies on this (storage.c)
@@ -842,14 +854,17 @@ def push_key(ident: Identity = AuthDep):
 def push_subscribe(ident: Identity = AuthDep, sub: dict = Body(...)):
     if not sub.get("endpoint") or "keys" not in sub:
         raise HTTPException(400, "not a push subscription")
-    push.save_subscription(ident.user_id, sub)
+    try:
+        push.save_subscription(ident.user_id, sub)   # endpoint allowlist
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"ok": True}
 
 
 @router.post("/push/unsubscribe")
 def push_unsubscribe(ident: Identity = AuthDep, sub: dict = Body(...)):
-    if sub.get("endpoint"):
-        push.drop_subscription(sub["endpoint"])
+    if isinstance(sub.get("endpoint"), str):
+        push.drop_subscription(sub["endpoint"], ident.user_id)
     return {"ok": True}
 
 

@@ -73,10 +73,11 @@ def _tts_wav(text: str) -> bytes:
             subprocess.run(
                 ["piper", "--model", db.env("PIPER_VOICE"),
                  "--output_file", out],
-                input=text.encode(), check=True, capture_output=True)
+                input=text.encode(), check=True, capture_output=True,
+                timeout=120)
         else:
             subprocess.run(["espeak-ng", "-w", out, text],
-                           check=True, capture_output=True)
+                           check=True, capture_output=True, timeout=120)
         with open(out, "rb") as f:
             return f.read()
 

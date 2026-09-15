@@ -16,6 +16,7 @@ straight to the audio instead of listing the inbox first.
 import json
 import logging
 import smtplib
+import ssl
 from datetime import datetime, timezone
 from email.message import EmailMessage
 
@@ -153,7 +154,10 @@ def send_email(user_id: int, subject: str, body: str,
         msg.add_alternative(html, subtype="html")
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-            s.starttls()
+            # explicit context: smtplib's default STARTTLS context does
+            # not verify the server certificate, and login codes plus
+            # the SMTP credentials ride this connection
+            s.starttls(context=ssl.create_default_context())
             if SMTP_USER:
                 s.login(SMTP_USER, SMTP_PASS)
             s.send_message(msg)

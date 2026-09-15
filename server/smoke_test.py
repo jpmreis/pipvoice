@@ -66,7 +66,7 @@ ok(r.status_code == 200 and [x["device_id"] for x in r.json()] == ["grandma"],
 
 # --- voice control (accessibility): flag, prompts, per-device config ---
 r = c.get("/v1/device", headers=H_E)
-ok(r.status_code == 200 and r.json() == {"voice": False, "prompts": []},
+ok(r.status_code == 200 and {k: r.json()[k] for k in ("voice", "prompts")} == {"voice": False, "prompts": []},
    "voice: /v1/device defaults off")
 ok(c.get("/v1/device").status_code == 404,
    "voice: /v1/device rejects non-device identities")
@@ -117,16 +117,34 @@ r = c.post("/v1/managed/pip-ella-01/voice", json={"on": False})
 ok(r.status_code == 200 and r.json()["voice"] is False,
    "device admin turns voice off")
 r = c.get("/v1/device", headers=H_E)
-ok(r.json() == {"voice": False, "prompts": []},
+ok({k: r.json()[k] for k in ("voice", "prompts")} == {"voice": False, "prompts": []},
    "voice off again: config reflects it")
 
 # --- send a message ella -> grandma ---
-vmsg = b"VMSG" + bytes(8) + b"\x02\x00ab" * 50
+# a real 1 s recording in the firmware's container: the server now decodes
+# every VMSG at ingest (that is what bounds the memory an upload can
+# cost), so a stub the decoder rejects is refused, not stored
+import math as _math, struct as _struct
+from app import vmsg as _vm
+_pcm1 = b"".join(_struct.pack("<h", int(8000 * _math.sin(t / 16000 * 2 * _math.pi * 440)))
+                 for t in range(16000))
+vmsg = _vm._encode_vmsg(_pcm1, 1)
 r = c.post("/v1/messages", headers=H_E,
            data={"recipient_id": "grandma", "duration": "7"},
            files={"audio": ("m.vmsg", io.BytesIO(vmsg))})
 ok(r.status_code == 200, "message uploaded")
 mid = r.json()["id"]
+r = c.post("/v1/messages", headers=H_E,
+           data={"recipient_id": "grandma", "duration": "1"},
+           files={"audio": ("m.vmsg", io.BytesIO(b"VMSG" + bytes(8) + b"\x02\x00ab" * 50))})
+ok(r.status_code == 400, "undecodable VMSG upload is refused")
+# 3 MB of 1-byte silent opus frames would decode to ~2 GB of PCM
+_bomb = vmsg[:12] + (_struct.pack("<H", 1) + b"\x08") * 1_000_000
+r = c.post("/v1/messages", headers=H_E,
+           data={"recipient_id": "grandma", "duration": "1"},
+           files={"audio": ("m.vmsg", io.BytesIO(_bomb))})
+ok(r.status_code == 400 and "longer than" in r.text,
+   "decode bomb refused at the length cap")
 
 # the box's MQTT notify carries the whole .meta so it can fetch the audio
 # directly instead of listing the inbox first (one TLS handshake, not two),
@@ -173,7 +191,8 @@ for hdr, label in [(H_G, "device"), (utok, "user session")]:
 
 # --- download, ack, delete ---
 r = c.get(f"/v1/messages/{mid}/audio", headers=H_G)
-ok(r.status_code == 200 and r.content == vmsg, "audio downloads intact")
+ok(r.status_code == 200 and r.content[:12] == vmsg[:12]
+   and _vm._vmsg_to_pcm(r.content)[0], "audio downloads as a decodable VMSG")
 ok(c.post(f"/v1/messages/{mid}/ack", headers=H_G).status_code == 200, "ack")
 ok(c.delete(f"/v1/messages/{mid}", headers=H_G).status_code == 200, "delete")
 ok(c.get("/v1/inbox", headers=H_G).json() == [], "inbox empty after delete")
@@ -442,22 +461,28 @@ ok(r.status_code == 200 and len(r.json()["key"]) > 60, "VAPID key generated")
 sub = {"endpoint": "https://push.example/sub1",
        "keys": {"p256dh": "BPk", "auth": "aaa"}}
 r = pweb.post("/v1/push/subscribe", json=sub)
+ok(r.status_code == 400, "push endpoint outside the known services is refused")
+sub["endpoint"] = "https://fcm.googleapis.com/fcm/send/sub1"
+r = pweb.post("/v1/push/subscribe", json=sub)
 ok(r.status_code == 200, "push subscribe stored")
+# unsubscribe is scoped to the owner: grandma's session cannot drop it
+r = c.post("/v1/push/unsubscribe", headers=utok, json={"endpoint": sub["endpoint"]})
+with adb.conn() as cc:
+    _n = adb.one(cc, "SELECT COUNT(*) n FROM push_subs")["n"]
+ok(r.status_code == 200 and _n == 1, "another user's unsubscribe does not drop it")
 
 pushes = []
 real_webpush = pywebpush.webpush
 pywebpush.webpush = lambda *a, **k: pushes.append(a[1])  # (sub_info, json)
-vmsg_b = b"VMSG" + bytes(8) + b"\x02\x00ab" * 50
 r = web.post("/v1/messages", headers=H_G,
              data={"recipient_id": "webby", "duration": "1"},
-             files={"audio": ("m.vmsg", io.BytesIO(vmsg_b))})
+             files={"audio": ("m.vmsg", io.BytesIO(vmsg))})
 ok(r.status_code == 200 and len(pushes) == 1,
    "notify ladder: phone user got web push (no MQTT)")
 wmid2 = r.json()["id"]
 
 # a push is a promise the message is fetchable: the compressed file the
-# service worker prefetches must exist before the push goes out. Sent here
-# with a real recording, since vmsg_b above is a stub libopus rejects.
+# service worker prefetches must exist before the push goes out.
 pushes.clear()
 r = web.post("/v1/messages", headers=H_G,
              data={"recipient_id": "webby", "duration": "1"},
@@ -469,9 +494,6 @@ ok(len(pushes) == 1 and _os.path.exists(adb.playback_path(seq_id)),
 # way to know it while the app is closed. webby has wmid2 + seq_id unheard.
 ok(_json.loads(pushes[0])["unread"] == 2,
    "push carries the unread count for the app badge")
-# ...and a message libopus can't render still gets announced
-ok(not _os.path.exists(adb.playback_path(wmid2)) and len(pushes) == 1,
-   "unrenderable audio still pushes (client falls back to the wav)")
 pweb.delete(f"/v1/messages/{seq_id}")          # webby is the recipient
 ok(not _os.path.exists(adb.playback_path(seq_id)),
    "delete removes the playback rendering too")
@@ -482,7 +504,7 @@ def dead(*a, **k):
 pywebpush.webpush = dead
 r = web.post("/v1/messages", headers=H_G,
              data={"recipient_id": "webby", "duration": "1"},
-             files={"audio": ("m.vmsg", io.BytesIO(vmsg_b))})
+             files={"audio": ("m.vmsg", io.BytesIO(vmsg))})
 ok(r.status_code == 200, "send survives dead subscription (falls to email)")
 wmid3 = r.json()["id"]
 with adb.conn() as cc:
@@ -578,7 +600,7 @@ pweb.post("/v1/auth/verify-code", data={"email": plant_code("webby"),
                                         "code": "123456"})
 pweb.post("/v1/push/subscribe", json=sub)
 r = pweb.post("/v1/messages", data={"recipient_id": "grandma", "duration": "1"},
-              files={"audio": ("m.vmsg", io.BytesIO(vmsg_b))})
+              files={"audio": ("m.vmsg", io.BytesIO(vmsg))})
 pmid = r.json()["id"]
 bodies = []
 pywebpush.webpush = lambda *a, **k: bodies.append(a[1])  # (sub_info, json)

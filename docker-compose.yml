@@ -7,6 +7,14 @@ services:
   app:
     build: ./server
     restart: unless-stopped
+    # The app parses attacker-supplied audio with ffmpeg; give that
+    # process as little as possible. Still root inside the container
+    # (the bind-mounted data and broker-auth dirs are owned by other
+    # uids), so keep just the two capabilities that root needs to write
+    # there - everything else (raw sockets, mounts, setuid, ...) is gone.
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE, FOWNER]
+    security_opt: ["no-new-privileges:true"]
     environment:
       PIP_BASE_URL: https://${DOMAIN:?set DOMAIN in .env}
       PIP_DATA: /data
@@ -31,6 +39,7 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
     entrypoint: ["/bin/sh", "/pip/entrypoint.sh"]
     environment:
       DOMAIN: ${DOMAIN}
@@ -47,6 +56,7 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
     ports:
       - "80:80"
       - "443:443"

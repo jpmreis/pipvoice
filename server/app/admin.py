@@ -102,7 +102,9 @@ def login_post(request: Request, action: str = Form(...),
         u = user_by_email(email)
         stats.event("login.code", dim="admin",
                     user_id=u["id"] if u and u["is_admin"] else None)
-        if u and u["is_admin"]:
+        # per-account cap on top of the per-IP one (see api.request_code)
+        if u and u["is_admin"] and not login_blocked(f"code-user:{u['id']}"):
+            login_failed(f"code-user:{u['id']}")
             emails.send_login_code(u["id"], u["display_name"],
                                    issue_login_code(u["id"]))
         # identical response whether or not the address matched an admin

@@ -12,6 +12,30 @@ write entries for humans.
 
 ## [Unreleased]
 
+Server hardening from a security audit (2026-09-15). No firmware or
+PWA changes; nothing a family member will notice.
+
+### Fixed
+- An upload could exhaust the server's memory: a few MB of empty opus
+  frames or FLAC silence decoded to gigabytes of PCM. Both ingest paths
+  now stop at the message length limit (`PIP_MAX_MSG_S`, one home in
+  `vmsg.py`), a VMSG must be the 16 kHz / 20 ms container the firmware
+  writes, and every ffmpeg / TTS child has a timeout.
+- Login-code emails travelled over an unverified SMTP TLS session
+  (Python's default STARTTLS context does not check the certificate).
+- `/openapi.json` was public; it is off with the docs now.
+- A push subscription's endpoint is now allowlisted to the browsers'
+  push services (`PIP_PUSH_HOSTS` extends the list) instead of any URL
+  the server would then POST to, and unsubscribe only removes the
+  caller's own subscription.
+- Code requests are capped per account as well as per IP, so one
+  address can no longer be flooded with codes from many IPs.
+
+### Changed
+- Docker: the app container drops every capability but the two root
+  needs for the bind-mounted data dirs; all three containers run with
+  `no-new-privileges`.
+
 ## [1.3.11] — 2026-09-15
 
 The box now tells you when a message can't be sent, instead of quietly

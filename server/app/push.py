@@ -7,6 +7,7 @@ to email. Transient failures (429/5xx/network) keep the row.
 """
 import json
 import logging
+from urllib.parse import urlsplit
 
 from . import db, stats
 
@@ -66,7 +67,40 @@ def public_key() -> str:
     return _pub_cache
 
 
+# Push endpoints the server will POST to. A subscription's endpoint is
+# whatever the browser hands us, and the server then makes an outbound
+# request to it on every message - without this list any signed-in user
+# could point that request at anything reachable from the server (the
+# compose network, the cloud metadata address, ...). The browsers we
+# target use exactly these services; PIP_PUSH_HOSTS adds more (comma-
+# separated hostnames, subdomains included) for other browsers.
+PUSH_HOSTS = ("fcm.googleapis.com", "push.apple.com",
+              "push.services.mozilla.com", "notify.windows.com",
+              "push.samsungosp.com")
+PUSH_HOSTS += tuple(h.strip().lower() for h in
+                    db.env("PUSH_HOSTS", "").split(",") if h.strip())
+
+
+def valid_endpoint(endpoint) -> bool:
+    """https, and a host that is one of PUSH_HOSTS or a subdomain of one."""
+    if not isinstance(endpoint, str) or len(endpoint) > 2048:
+        return False
+    try:
+        u = urlsplit(endpoint)
+    except ValueError:
+        return False
+    host = (u.hostname or "").lower()
+    return (u.scheme == "https" and bool(host)
+            and any(host == h or host.endswith("." + h) for h in PUSH_HOSTS))
+
+
 def save_subscription(user_id: int, sub: dict) -> None:
+    if not valid_endpoint(sub.get("endpoint")):
+        raise ValueError("push endpoint is not a known push service")
+    keys = sub.get("keys") or {}
+    if not isinstance(keys.get("p256dh"), str) \
+            or not isinstance(keys.get("auth"), str):
+        raise ValueError("push subscription has no keys")
     with db.conn() as c:
         c.execute("""INSERT INTO push_subs (endpoint,user_id,p256dh,auth)
                      VALUES (?,?,?,?)
@@ -77,9 +111,12 @@ def save_subscription(user_id: int, sub: dict) -> None:
                    sub["keys"]["p256dh"], sub["keys"]["auth"]))
 
 
-def drop_subscription(endpoint: str) -> None:
+def drop_subscription(endpoint: str, user_id: int) -> None:
+    """Scoped to the owner: an endpoint URL is a capability to silence
+    that install, so nobody else's knowledge of it may delete it."""
     with db.conn() as c:
-        c.execute("DELETE FROM push_subs WHERE endpoint=?", (endpoint,))
+        c.execute("DELETE FROM push_subs WHERE endpoint=? AND user_id=?",
+                  (endpoint, user_id))
 
 
 def send_to_user(user_id: int, payload: dict) -> int:
@@ -106,7 +143,7 @@ def send_to_user(user_id: int, payload: dict) -> int:
         except WebPushException as e:
             code = e.response.status_code if e.response is not None else None
             if code in (404, 410):
-                drop_subscription(s["endpoint"])
+                drop_subscription(s["endpoint"], user_id)
                 log.info("pruned dead subscription for user %d (%s)",
                          user_id, code)
                 stats.event("push.pruned", user_id=user_id, detail=str(code))

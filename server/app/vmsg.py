@@ -29,20 +29,37 @@ FRAME_MS = 20
 FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000          # 320
 FRAME_BYTES = FRAME_SAMPLES * 2                         # s16 mono
 MAX_PACKET = 400                                        # firmware reader cap
+# Longest recording accepted, in seconds (mirrors the firmware's
+# max_message_s; api.py re-exports it). Enforced on the DECODED length of
+# both ingest paths: a few MB of empty opus frames or FLAC silence expand
+# to gigabytes of PCM otherwise - one upload could take the server down.
+MAX_MSG_S = int(db.env("MAX_MSG_S", "90"))
+# Every ffmpeg call is bounded: a decode that is still running after this
+# is not a recording, and a hung child would otherwise pin a worker
+# thread forever (single uvicorn worker, small thread pool).
+FFMPEG_TIMEOUT_S = 60
 
 
-def _ffmpeg_decode(data: bytes) -> bytes:
+def _ffmpeg_decode(data: bytes, max_seconds: int) -> bytes:
     """Any audio container -> raw s16le 16 kHz mono. Via a temp file:
-    MP4 needs seekable input, so stdin piping is not an option."""
+    MP4 needs seekable input, so stdin piping is not an option. The
+    .audio suffix is load-bearing: ffmpeg refuses to probe playlist
+    formats (m3u8) from a non-standard extension, which is what keeps a
+    crafted upload from making the server fetch URLs. -t stops the decode
+    one second past the limit, so an over-length (or bomb) upload costs
+    at most max_seconds of PCM before transcode_to_vmsg rejects it."""
     with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as tf:
         tf.write(data)
         src = tf.name
     try:
         p = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", src,
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+             "-i", src, "-t", str(max_seconds + 1),
              "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1",
              "-ar", str(SAMPLE_RATE), "pipe:1"],
-            capture_output=True)
+            capture_output=True, timeout=FFMPEG_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise ValueError("audio decode timed out")
     finally:
         os.unlink(src)
     if p.returncode != 0 or not p.stdout:
@@ -72,7 +89,7 @@ def _measure_pcm(pcm: bytes, sr: int) -> tuple[float, float]:
     p = subprocess.run(
         ["ffmpeg", "-hide_banner", "-f", "s16le", "-ar", str(sr), "-ac", "1",
          "-i", "pipe:0", "-af", "volumedetect", "-f", "null", "-"],
-        input=pcm, capture_output=True)
+        input=pcm, capture_output=True, timeout=FFMPEG_TIMEOUT_S)
     mean_db = max_db = None
     for line in p.stderr.decode(errors="replace").splitlines():
         if "mean_volume:" in line:
@@ -102,7 +119,7 @@ def normalize_pcm(pcm: bytes, sr: int = SAMPLE_RATE) -> bytes:
              "-af", f"volume={gain:.1f}dB,"
                     f"alimiter=level=false:limit={limit:.3f}",
              "-f", "s16le", "-ar", str(sr), "-ac", "1", "pipe:1"],
-            input=pcm, capture_output=True)
+            input=pcm, capture_output=True, timeout=FFMPEG_TIMEOUT_S)
         if p.returncode != 0 or not p.stdout:
             raise ValueError(p.stderr.decode(errors="replace")[-200:])
         log.info("normalized: mean %.1f max %.1f -> gain %+.1f dB",
@@ -113,16 +130,20 @@ def normalize_pcm(pcm: bytes, sr: int = SAMPLE_RATE) -> bytes:
         return pcm
 
 
-def normalize_vmsg(data: bytes) -> bytes:
+def normalize_vmsg(data: bytes, max_seconds: int = MAX_MSG_S) -> bytes:
     """Level-normalize a box-recorded .vmsg at ingest: decode, normalize,
     re-encode. The tandem 16 kbps Opus generation is the price of a level
     fix the firmware can't do; when the level is already right (gain under
     the 1 dB threshold) the original bytes pass through untouched, and any
-    failure also returns them untouched."""
+    normalization failure also returns them untouched.
+
+    The decode itself is NOT forgiven: a malformed header or a recording
+    past max_seconds raises ValueError and the upload is refused - that
+    check is what bounds how much PCM one request can make us hold."""
+    pcm, sr = _vmsg_to_pcm(data, max_seconds)
+    if not pcm:
+        raise ValueError("empty recording")
     try:
-        pcm, sr = _vmsg_to_pcm(data)
-        if not pcm:
-            return data
         out = normalize_pcm(pcm, sr)
         if out is pcm:                      # already at level: keep the
             return data                     # original single-generation opus
@@ -162,7 +183,7 @@ def _encode_vmsg(pcm: bytes, duration_s: int) -> bytes:
 def transcode_to_vmsg(data: bytes, max_seconds: int) -> tuple[bytes, int]:
     """Browser upload -> (vmsg bytes, duration seconds). Raises ValueError
     on undecodable audio or over-length recordings."""
-    pcm = _ffmpeg_decode(data)
+    pcm = _ffmpeg_decode(data, max_seconds)
     duration_s = len(pcm) // (SAMPLE_RATE * 2)
     if duration_s > max_seconds:
         raise ValueError(f"recording longer than {max_seconds}s limit")
@@ -170,13 +191,21 @@ def transcode_to_vmsg(data: bytes, max_seconds: int) -> tuple[bytes, int]:
     return _encode_vmsg(pcm, duration_s), duration_s
 
 
-def _vmsg_to_pcm(data: bytes) -> tuple[bytes, int]:
-    """.vmsg bytes -> (raw s16 mono PCM, sample rate)."""
+def _vmsg_to_pcm(data: bytes, max_seconds: int = MAX_MSG_S
+                 ) -> tuple[bytes, int]:
+    """.vmsg bytes -> (raw s16 mono PCM, sample rate). Raises ValueError
+    for anything but the one container shape the firmware and _encode_vmsg
+    produce (16 kHz, 20 ms frames), for a broken opus packet, and for a
+    recording that decodes past max_seconds - checked as it grows, so the
+    cost of a rejected upload is bounded by the limit, not the input."""
     if len(data) < 12 or data[:4] != b"VMSG":
         raise ValueError("not a vmsg file")
     _ver, sr100, frame_ms, _dur = struct.unpack_from("<4H", data, 4)
     sr = sr100 * 100
+    if sr != SAMPLE_RATE or frame_ms != FRAME_MS:
+        raise ValueError(f"unsupported vmsg format: {sr} Hz / {frame_ms} ms")
     frame_samples = sr * frame_ms // 1000
+    max_bytes = (max_seconds + 1) * sr * 2       # +1 s: firmware rounding
     dec = opuslib.Decoder(sr, 1)
 
     pcm = bytearray()
@@ -186,7 +215,12 @@ def _vmsg_to_pcm(data: bytes) -> tuple[bytes, int]:
         off += 2
         if n == 0 or n > MAX_PACKET or off + n > len(data):
             break
-        pcm += dec.decode(bytes(data[off:off + n]), frame_samples)
+        try:
+            pcm += dec.decode(bytes(data[off:off + n]), frame_samples)
+        except opuslib.OpusError as e:
+            raise ValueError(f"bad opus packet: {e}")
+        if len(pcm) > max_bytes:
+            raise ValueError(f"recording longer than {max_seconds}s limit")
         off += n
     return bytes(pcm), sr
 
@@ -222,7 +256,7 @@ def vmsg_to_m4a(data: bytes) -> bytes:
              # moov atom first: <audio> can start on the leading bytes
              # instead of waiting out the whole download
              "-movflags", "+faststart", "-f", "mp4", dst],
-            input=pcm, capture_output=True)
+            input=pcm, capture_output=True, timeout=FFMPEG_TIMEOUT_S)
         if p.returncode != 0:
             raise ValueError("aac encode failed: "
                              + p.stderr.decode(errors="replace")[-300:])

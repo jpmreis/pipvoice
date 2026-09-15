@@ -140,8 +140,8 @@ def version_of(name: str, fmt: str | None = None) -> str:
 
 
 def _ffmpeg(src: str, dst: str, *args: str) -> None:
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src,
-                    *args, dst], check=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-nostdin",
+                    "-i", src, *args, dst], check=True, timeout=120)
 
 
 def _raw565(src: str, dst: str, w: int, h: int) -> None:
@@ -179,7 +179,8 @@ def render_all() -> None:
                 _ffmpeg(src, web_path(t["name"]),
                         "-vf", "scale=1080:-2:flags=lanczos", "-q:v", "4")
             log.info("theme %s ready", t["name"])
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                FileNotFoundError) as e:
             log.error("theme %s render failed: %s", t["name"], e)
 
 

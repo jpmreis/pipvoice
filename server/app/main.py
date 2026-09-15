@@ -27,7 +27,10 @@ db.init()
 threading.Thread(target=themes.render_all, name="themes",
                  daemon=True).start()
 
-app = FastAPI(title="Pip", docs_url=None, redoc_url=None)
+# no interactive docs and no /openapi.json: the schema lists every
+# route (admin ones included) and nothing of ours consumes it
+app = FastAPI(title="Pip", docs_url=None, redoc_url=None,
+              openapi_url=None)
 app.include_router(api_router)
 app.include_router(admin_router)
 
