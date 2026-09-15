@@ -262,6 +262,7 @@ async def csp_report(request: Request):
         if isinstance(rep, list):          # Reporting API shape
             rep = (rep[0] or {}).get("body", {}) if rep else {}
         directive = str(rep.get("effective-directive")
+                        or rep.get("effectiveDirective")
                         or rep.get("violated-directive") or "?")[:40]
         blocked = str(rep.get("blocked-uri") or rep.get("blockedURL") or "")
         bu = urlsplit(blocked) if "://" in blocked else None

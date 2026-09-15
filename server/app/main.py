@@ -76,9 +76,11 @@ _APP_CACHE = (("/app/fonts/", "public, max-age=31536000, immutable"),
 # embed data). No inline event handlers anywhere (setup.html's back
 # button moved to setup.js). Styles stay 'unsafe-inline': the PWA builds
 # style="" attributes in JS and the risk there is cosmetic.
-# CSP_HEADER flips between report-only and enforcing; the browser console
-# shows violations either way.
-CSP_HEADER = "Content-Security-Policy-Report-Only"
+# CSP_HEADER flips between enforcing and report-only; violations reach
+# /v1/csp-report (api.csp_report) either way and show on the analytics
+# page under "csp". Enforcing since 1.3.12, after a report-only pass over
+# every page in Chrome produced no reports.
+CSP_HEADER = "Content-Security-Policy"
 _INLINE_SCRIPT = re.compile(r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>",
                             re.S | re.I)
 

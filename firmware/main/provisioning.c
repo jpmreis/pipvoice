@@ -29,13 +29,17 @@ static volatile bool  s_running;
 static volatile bool  s_dns_alive;
 static volatile bool  s_relay_mode;   /* NAPT up, DNS forwards upstream */
 static esp_timer_handle_t s_idle_timer;
+static esp_timer_handle_t s_cap_timer;
+static uint32_t           s_ap_ip;      /* AP-side address, network order */
 
 #define SETUP_IDLE_TIMEOUT_US (10ULL * 60 * 1000 * 1000)
+/* hard ceiling on a setup session, idle or not: the idle timer is
+ * re-armed by portal traffic, and traffic is cheap to fake */
+#define SETUP_MAX_TOTAL_US    (30ULL * 60 * 1000 * 1000)
 
 static void idle_timeout_cb(void *arg)
 {
-    (void)arg;
-    ESP_LOGW(TAG, "setup mode idle timeout - restarting");
+    ESP_LOGW(TAG, "setup mode %s - restarting", (const char *)arg);
     esp_restart();
 }
 
@@ -45,6 +49,52 @@ static void idle_timer_touch(void)
 {
     if (s_idle_timer)
         esp_timer_restart(s_idle_timer, SETUP_IDLE_TIMEOUT_US);
+}
+
+static void timer_kill(esp_timer_handle_t *t)
+{
+    if (!*t) return;
+    esp_timer_stop(*t);
+    esp_timer_delete(*t);
+    *t = NULL;
+}
+
+/* Only the phone on the setup AP may drive the portal. In relay mode the
+ * httpd also answers on the STA side - the home LAN - with the same
+ * unauthenticated handlers, so any LAN host (or a web page open in a
+ * family browser, cross-site) could save a rogue network, forget the
+ * home one, list the saved SSIDs, or keep the idle timer alive for ever.
+ * The test is where the request landed, not where it came from: the AP
+ * address is only reachable through the AP. */
+static bool via_ap(httpd_req_t *req)
+{
+    int fd = httpd_req_to_sockfd(req);
+    struct sockaddr_storage ss;
+    socklen_t len = sizeof(ss);
+    if (fd < 0 || getsockname(fd, (struct sockaddr *)&ss, &len) != 0)
+        return false;
+    uint32_t local = 0;
+    if (ss.ss_family == AF_INET) {
+        local = ((struct sockaddr_in *)&ss)->sin_addr.s_addr;
+    } else if (ss.ss_family == AF_INET6) {
+        /* dual-stack listener (CONFIG_LWIP_IPV6): an IPv4 connection
+         * reports its address as ::ffff:a.b.c.d */
+        static const uint8_t v4map[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                           0xff, 0xff };
+        const uint8_t *a = ((struct sockaddr_in6 *)&ss)->sin6_addr.s6_addr;
+        if (memcmp(a, v4map, sizeof(v4map)) != 0) return false;
+        memcpy(&local, a + 12, sizeof(local));
+    } else {
+        return false;
+    }
+    return s_ap_ip != 0 && local == s_ap_ip;
+}
+
+static esp_err_t deny(httpd_req_t *req)
+{
+    ESP_LOGW(TAG, "portal request not via the setup AP - refused");
+    httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "setup AP only");
+    return ESP_OK;
 }
 
 /* ---------------- relay: NAPT the phone out the STA side -----------------
@@ -88,10 +138,12 @@ static void dns_task(void *arg)
 {
     (void)arg;
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    /* AP address only: in relay mode INADDR_ANY would also make this an
+     * open resolver on the home LAN */
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port = htons(53),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
+        .sin_addr.s_addr = s_ap_ip ? s_ap_ip : htonl(INADDR_ANY),
     };
     /* timeout so the loop notices s_running=false; without it the task
      * blocks in recvfrom forever and leaks the port-53 socket */
@@ -160,11 +212,8 @@ static void dns_task(void *arg)
  * later setup attempt fails with EADDRINUSE. */
 static void portal_teardown(void)
 {
-    if (s_idle_timer) {
-        esp_timer_stop(s_idle_timer);
-        esp_timer_delete(s_idle_timer);
-        s_idle_timer = NULL;
-    }
+    timer_kill(&s_idle_timer);
+    timer_kill(&s_cap_timer);
     s_running = false;
     if (s_httpd) {
         esp_err_t rc = ESP_FAIL;
@@ -220,6 +269,7 @@ static void json_escape(char *out, size_t cap, const char *in)
 /* ---------------- HTTP handlers ---------------- */
 static esp_err_t root_get(httpd_req_t *req)
 {
+    if (!via_ap(req)) return deny(req);
     idle_timer_touch();
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, portal_html_start,
@@ -228,6 +278,7 @@ static esp_err_t root_get(httpd_req_t *req)
 
 static esp_err_t scan_get(httpd_req_t *req)
 {
+    if (!via_ap(req)) return deny(req);
     idle_timer_touch();
     wifi_scan_config_t sc = { .show_hidden = false };
     esp_wifi_scan_start(&sc, true);
@@ -257,6 +308,7 @@ static esp_err_t scan_get(httpd_req_t *req)
 /* saved networks, names only - never the passwords */
 static esp_err_t known_get(httpd_req_t *req)
 {
+    if (!via_ap(req)) return deny(req);
     idle_timer_touch();
     wifi_cred_t nets[CFG_MAX_WIFI];
     uint8_t n = config_wifi_list(nets, CFG_MAX_WIFI);
@@ -279,6 +331,7 @@ static esp_err_t known_get(httpd_req_t *req)
 
 static esp_err_t forget_post(httpd_req_t *req)
 {
+    if (!via_ap(req)) return deny(req);
     idle_timer_touch();
     char body[160] = {0};       /* "ssid=" + a fully %XX-escaped SSID */
     int len = httpd_req_recv(req, body, sizeof(body) - 1);
@@ -297,6 +350,7 @@ static esp_err_t forget_post(httpd_req_t *req)
 
 static esp_err_t save_post(httpd_req_t *req)
 {
+    if (!via_ap(req)) return deny(req);
     idle_timer_touch();
     char body[160] = {0};
     int len = httpd_req_recv(req, body, sizeof(body) - 1);
@@ -325,6 +379,7 @@ static esp_err_t save_post(httpd_req_t *req)
 /* setup progress for portal.html */
 static esp_err_t status_get(httpd_req_t *req)
 {
+    if (!via_ap(req)) return deny(req);
     idle_timer_touch();
     const char *st;
     bool portal = false;
@@ -365,6 +420,9 @@ bool provisioning_start(char *ap_ssid, char *ap_pass)
 
     if (!s_ap_netif) s_ap_netif = esp_netif_create_default_wifi_ap();
     if (!s_ap_netif) return false;
+    esp_netif_ip_info_t ipi;
+    s_ap_ip = (esp_netif_get_ip_info(s_ap_netif, &ipi) == ESP_OK && ipi.ip.addr)
+            ? ipi.ip.addr : esp_ip4addr_aton("192.168.4.1");
 
     wifi_config_t wc = { 0 };
     strlcpy((char *)wc.ap.ssid, ap_ssid, sizeof(wc.ap.ssid));
@@ -424,9 +482,13 @@ bool provisioning_start(char *ap_ssid, char *ap_pass)
     httpd_register_uri_handler(s_httpd, &u_any);   /* captive: everything -> portal */
 
     const esp_timer_create_args_t targs = {
-        .callback = idle_timeout_cb, .name = "prov_idle" };
+        .callback = idle_timeout_cb, .arg = "idle timeout", .name = "prov_idle" };
     esp_timer_create(&targs, &s_idle_timer);
     esp_timer_start_once(s_idle_timer, SETUP_IDLE_TIMEOUT_US);
+    const esp_timer_create_args_t cargs = {
+        .callback = idle_timeout_cb, .arg = "time limit", .name = "prov_cap" };
+    esp_timer_create(&cargs, &s_cap_timer);
+    esp_timer_start_once(s_cap_timer, SETUP_MAX_TOTAL_US);
 
     ESP_LOGI(TAG, "AP '%s' up, portal at 192.168.4.1%s", ap_ssid,
              s_relay_mode ? " (relay)" : "");

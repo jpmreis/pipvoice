@@ -12,10 +12,19 @@ write entries for humans.
 
 ## [Unreleased]
 
-Server hardening from a security audit (2026-09-15). No firmware or
-PWA changes; nothing a family member will notice.
+Server and firmware hardening from a security audit (2026-09-15).
+No PWA changes; nothing a family member will notice.
 
 ### Fixed
+- Firmware: the WiFi-setup portal only answers the phone on the setup
+  AP. When setup was opened while the box was already online, the same
+  unauthenticated portal was also reachable at the box's home-LAN
+  address, so any device on the LAN (or a web page open in a family
+  browser) could save a rogue network, forget the home one, list the
+  saved SSIDs, or keep the session alive indefinitely. Requests that
+  do not arrive on the AP address are refused, the setup-mode DNS
+  listens on the AP address only, and a setup session now ends after
+  30 minutes regardless of activity (the 10-minute idle timeout stays).
 - An upload could exhaust the server's memory: a few MB of empty opus
   frames or FLAC silence decoded to gigabytes of PCM. Both ingest paths
   now stop at the message length limit (`PIP_MAX_MSG_S`, one home in
@@ -39,9 +48,10 @@ PWA changes; nothing a family member will notice.
   hourly.
 
 ### Changed
-- Every response now carries a Content-Security-Policy (report-only
-  first, enforcing once the browsers have been checked): own-origin
-  only, inline scripts by hash or nonce, no inline handlers.
+- Every response now carries an enforcing Content-Security-Policy:
+  own-origin only, inline scripts by hash or nonce, no inline handlers.
+  Violations are reported to `/v1/csp-report` and listed on the admin
+  analytics page under "csp".
 - The broker password is no longer kept in the database. It exists only
   in the box's NVS and hashed in mosquitto's passwd file; a re-key now
   mints a fresh one along with the token (the box is reflashed either
