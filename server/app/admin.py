@@ -213,7 +213,7 @@ RANGES = {"7d": 7, "30d": 30, "90d": 90, "all": None}
 KIND_FILTERS = (("all", ""), ("messages", "msg."), ("reactions", "reaction"),
                 ("logins", "login."), ("push", "push."), ("email", "email."),
                 ("devices", "device."), ("ota", "ota."),
-                ("http", "http."), ("server", "server."))
+                ("http", "http."), ("csp", "csp."), ("server", "server."))
 LOG_PAGE = 200
 
 

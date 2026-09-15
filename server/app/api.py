@@ -236,6 +236,46 @@ def waitlist_join(request: Request, background: BackgroundTasks,
     return {"ok": True}
 
 
+# ---------- CSP violation reports ----------
+# Browsers POST here (main.py's policy names it in report-uri) whenever
+# the policy blocks or, in report-only mode, would block something.
+# Unauthenticated by nature; the report is reduced to what the analytics
+# page can act on - directive, route group, blocked origin - and rate
+# limited per IP so it cannot be used to fill the events table.
+_CSP_REPORT_MAX = 4096
+
+
+@router.post("/csp-report", status_code=204)
+async def csp_report(request: Request):
+    rl_key = f"csp:{client_ip(request)}"
+    if login_blocked(rl_key):
+        return Response(status_code=204)
+    login_failed(rl_key)
+    body = await request.body()
+    if len(body) > _CSP_REPORT_MAX:
+        return Response(status_code=204)
+    try:
+        import json
+        from urllib.parse import urlsplit
+        rep = json.loads(body)
+        rep = rep.get("csp-report", rep) if isinstance(rep, dict) else {}
+        if isinstance(rep, list):          # Reporting API shape
+            rep = (rep[0] or {}).get("body", {}) if rep else {}
+        directive = str(rep.get("effective-directive")
+                        or rep.get("violated-directive") or "?")[:40]
+        blocked = str(rep.get("blocked-uri") or rep.get("blockedURL") or "")
+        bu = urlsplit(blocked) if "://" in blocked else None
+        blocked = (f"{bu.scheme}://{bu.hostname}" if bu and bu.hostname
+                   else blocked[:40])       # 'inline', 'eval', 'data', ...
+        doc = str(rep.get("document-uri") or rep.get("documentURL") or "")
+        group = stats.route_group(urlsplit(doc).path if doc else "")
+        stats.event("csp.violation", dim=directive,
+                    detail=f"{group} blocked={blocked}")
+    except Exception:
+        pass
+    return Response(status_code=204)
+
+
 @router.post("/auth/logout")
 def logout(request: Request, ident: Identity = AuthDep):
     sid = request.cookies.get("pip_session", "")

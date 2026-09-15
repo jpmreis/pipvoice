@@ -115,7 +115,8 @@ def _csp(nonce: str) -> str:
             "img-src 'self' data: blob:; media-src 'self' blob:; "
             "connect-src 'self'; font-src 'self'; worker-src 'self'; "
             "manifest-src 'self'; frame-ancestors 'none'; "
-            "base-uri 'self'; form-action 'self'; object-src 'none'")
+            "base-uri 'self'; form-action 'self'; object-src 'none'; "
+            "report-uri /v1/csp-report")
 
 
 @app.middleware("http")
