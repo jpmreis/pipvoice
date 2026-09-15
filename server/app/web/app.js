@@ -554,7 +554,7 @@ async function loadInbox() {
     row.innerHTML =
       `<span class="cdot" style="background:#${esc(m.sender_color)}">${esc(senderInitial)}</span>
        <span class="who"><span class="name">${esc(m.sender_name)}</span><br>
-         <span class="meta">${esc(m.when)} &middot; ${fmtDur(m.duration)}</span></span>
+         <span class="meta">${esc(fmtWhen(m))} &middot; ${fmtDur(m.duration)}</span></span>
        <span class="react-badge"></span>
        <button class="play">&#9654;&#xFE0E;</button>
        <button class="del">&#10005;</button>`;
@@ -1002,6 +1002,16 @@ function esc(s) {
     ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 }
 function fmtDur(s) { return s >= 60 ? `${Math.floor(s / 60)}m${s % 60}s` : `${s}s`; }
+// Same "Sun 14:05" the box shows, but in the phone's own timezone. The
+// server's `when` is UTC wall-clock (sqlite datetime('now') formatted as
+// is) and only stays as a fallback for a message without an epoch.
+const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function fmtWhen(m) {
+  if (!m.ts) return m.when || "";
+  const d = new Date(m.ts * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${WEEKDAY[d.getDay()]} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 function fmtClock(s) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
 
 document.addEventListener("visibilitychange", () => {
