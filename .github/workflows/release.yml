@@ -17,6 +17,9 @@ on:
     tags: ["v*"]
   workflow_dispatch: {}   # dry run: builds + packages, publishes nothing
 
+# Actions are pinned to commit SHAs (tag comments say which release):
+# this workflow's output is the fleet's firmware, so a moved tag must
+# not be able to change what runs here. Bump by editing the SHA.
 permissions:
   contents: write
 
@@ -26,7 +29,7 @@ jobs:
     outputs:
       ver: ${{ steps.ver.outputs.ver }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Resolve version (tag must match PROJECT_VER)
         id: ver
         run: |
@@ -55,12 +58,12 @@ jobs:
           - board: amoled-2.16
             idf: v5.5.5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           submodules: recursive
 
       - name: Build firmware (${{ matrix.board }}, ESP-IDF ${{ matrix.idf }})
-        uses: espressif/esp-idf-ci-action@v1
+        uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d  # v1
         with:
           esp_idf_version: ${{ matrix.idf }}
           target: esp32s3
@@ -68,7 +71,7 @@ jobs:
           command: idf.py -DPIP_BOARD=${{ matrix.board }} build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: build-${{ matrix.board }}
           path: |
@@ -81,10 +84,10 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           path: builds
 
@@ -99,7 +102,7 @@ jobs:
 
       - name: Publish GitHub Release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           body_path: dist/RELEASE_NOTES.md
           files: |
@@ -108,7 +111,7 @@ jobs:
 
       - name: Upload dry-run artifact
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: pip-${{ needs.version.outputs.ver }}-dryrun
           path: dist/

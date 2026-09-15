@@ -540,3 +540,8 @@ $("fl-connect").onclick = () => connect(true);
 $("fl-anyport").onclick = () => connect(false);
 $("fl-back").onclick = () => { port = null; init(); };
 init();
+
+// the header's back button (was an inline onclick; the CSP forbids those)
+document.getElementById("back")?.addEventListener("click", () => {
+  location.href = "./";
+});

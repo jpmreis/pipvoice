@@ -58,6 +58,10 @@ def cleanup_once(retention_days: int = RETENTION_DAYS,
         c.execute("""DELETE FROM reactions WHERE seen=1
                      AND created < datetime('now', ?)""",
                   (f"-{retention_days} days",))
+        # expired sessions and login codes are dead weight (and stale
+        # token hashes); auth already ignores them, so this is only tidy
+        c.execute("DELETE FROM sessions WHERE expires < datetime('now')")
+        c.execute("DELETE FROM login_codes WHERE expires < datetime('now')")
         ids = {r["id"] for r in db.all_(c, "SELECT id FROM messages")}
     now = time.time()
     for fn in os.listdir(db.AUDIO_DIR):

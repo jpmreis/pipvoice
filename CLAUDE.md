@@ -148,6 +148,15 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
   on the write lock). The firmware's `X-Pip-Diag` header keys
   (`v b r h m u rr`, `net_http_add_diag`) are a contract with
   `stats.parse_diag` — change both. DB is WAL mode since 1.3.8.
+- Security invariants (audit 2026-09-15): every ingest path decodes
+  audio under `vmsg.MAX_MSG_S` with subprocess timeouts (a 4 MB upload
+  once meant 2.7 GB of PCM); push endpoints are allowlisted
+  (`push.PUSH_HOSTS`); the broker password is never stored (rekey
+  mints a new one); every response carries a CSP built in `main.py`
+  (static inline scripts by hash, admin templates by nonce, no inline
+  handlers - a new inline `<script>` in a static page needs its file
+  added to `_static_script_hashes`, a template one needs
+  `nonce="{{ csp_nonce }}"`).
 - Auth modes: `PIP_LOCAL_AUTH=1` (self-host) enables scrypt local
   passwords and stops the boot-time blanking of `password_hash`;
   without it login is email-code only and hashes are blanked at boot.
@@ -210,8 +219,7 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
 
 Someday (agreed, not planned): firmware signing; config-push (would fix
 domain migration and NVS `device_name` renames without reflash); off-box
-backups; a mosquitto `.path` unit to replace the sudo reload; SQLite
-session-row cleanup (now also stale `login_codes` rows); vestigial strstr
+backups; a mosquitto `.path` unit to replace the sudo reload; vestigial strstr
 branch in `net_http.c`; admin edit-user form (email is editable per-row
 since the passwordless change; display name/color still SQL-only).
 

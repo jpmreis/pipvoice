@@ -126,12 +126,16 @@ def stash_get(nonce: str):
 def insert_device(c, device_id: str, user_id: int, admin_id=None,
                   board: str = boards.DEFAULT_BOARD) -> tuple[str, str]:
     """Insert the device row; returns (token_raw, mqtt_pass). Caller owns
-    the transaction and calls mqtt.provision_device once it commits."""
+    the transaction and calls mqtt.provision_device once it commits.
+
+    The broker password is NOT stored: it lives only in the box's NVS
+    and (hashed) in mosquitto's passwd file, like the bearer token. A
+    rekey mints a fresh one, so nothing needs the old value back."""
     token_raw, token_h = new_token()
     mqtt_pass = secrets.token_urlsafe(12)
     c.execute("""INSERT INTO devices (id,user_id,token_hash,mqtt_password,
-                 admin_id,board) VALUES (?,?,?,?,?,?)""",
-              (device_id, user_id, token_h, mqtt_pass, admin_id, board))
+                 admin_id,board) VALUES (?,?,?,'',?,?)""",
+              (device_id, user_id, token_h, admin_id, board))
     return token_raw, mqtt_pass
 
 
@@ -194,22 +198,21 @@ def create_device_user(creator_id: int, name: str, username: str,
 
 def rekey_device(device_id: str, device_name: str, pin: str,
                  base_url: str = "") -> str:
-    """Mint a fresh token for an existing device and stash a new NVS
-    image; the old token stops working. mqtt_pass is kept (stored in the
-    DB). Returns the stash nonce."""
+    """Mint a fresh token AND a fresh broker password for an existing
+    device and stash a new NVS image; the old credentials stop working
+    (the box must be reflashed either way). Returns the stash nonce."""
     pin = pin.strip()
     if not re.fullmatch(r"\d{4}", pin):
         raise HTTPException(400, "Settings PIN must be 4 digits")
     token_raw, token_h = new_token()
+    mqtt_pass = secrets.token_urlsafe(12)
     with db.conn() as c:
-        dev = db.one(c, "SELECT mqtt_password, board FROM devices WHERE id=?",
-                     (device_id,))
+        dev = db.one(c, "SELECT board FROM devices WHERE id=?", (device_id,))
         if not dev:
             raise HTTPException(404, "no such device")
         c.execute("UPDATE devices SET token_hash=? WHERE id=?",
                   (token_h, device_id))
-        mqtt_pass = dev["mqtt_password"]
-    # broker creds unchanged but re-assert them (repairs a lost passwd file)
+    # new broker password (also repairs a lost passwd file)
     mqtt.provision_device(device_id, mqtt_pass)
     # board comes from the row, never the caller: the hardware model of an
     # existing box is a fact, not a choice - a rekey must not change it

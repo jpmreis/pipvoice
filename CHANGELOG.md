@@ -31,10 +31,25 @@ PWA changes; nothing a family member will notice.
 - Code requests are capped per account as well as per IP, so one
   address can no longer be flooded with codes from many IPs.
 
+- Smaller ones: the login rate limiter's memory is bounded under a
+  flood of distinct addresses; a box's diagnostics header can no longer
+  500 a request with an out-of-range number; the admin session cookie
+  carries `Secure`; the web flasher's one-shot NVS nonce is redacted
+  from the access log; expired sessions and login codes are purged
+  hourly.
+
 ### Changed
+- Every response now carries a Content-Security-Policy (report-only
+  first, enforcing once the browsers have been checked): own-origin
+  only, inline scripts by hash or nonce, no inline handlers.
+- The broker password is no longer kept in the database. It exists only
+  in the box's NVS and hashed in mosquitto's passwd file; a re-key now
+  mints a fresh one along with the token (the box is reflashed either
+  way). Existing rows are blanked at boot.
 - Docker: the app container drops every capability but the two root
   needs for the bind-mounted data dirs; all three containers run with
   `no-new-privileges`.
+- CI: the release workflow's actions are pinned to commit SHAs.
 
 ## [1.3.11] — 2026-09-15
 

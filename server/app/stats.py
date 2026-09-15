@@ -156,9 +156,11 @@ def parse_diag(header: str) -> dict:
                 out[k] = v
         elif k in ("r", "h", "m", "u", "rr"):
             try:
-                out[k] = int(v)
+                n = int(v)
             except ValueError:
-                pass
+                continue
+            if abs(n) < 2**31:           # anything else is garbage, and
+                out[k] = n               # would overflow SQLite's INTEGER
     return out
 
 

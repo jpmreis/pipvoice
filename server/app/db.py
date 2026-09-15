@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS devices (
     id TEXT PRIMARY KEY,                -- e.g. pip-ella-01
     user_id INTEGER NOT NULL REFERENCES users(id),
     token_hash TEXT NOT NULL,
-    mqtt_password TEXT NOT NULL,
+    mqtt_password TEXT NOT NULL,        -- always '' since 1.3.12 (never stored)
     created TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen TEXT,
     voice INTEGER NOT NULL DEFAULT 0,   -- accessibility voice control
@@ -206,6 +206,9 @@ def init():
         if os.environ.get("PIP_LOCAL_AUTH") != "1":
             c.execute("UPDATE users SET password_hash='' "
                       "WHERE password_hash!=''")
+        # broker passwords are no longer kept (a rekey mints a new one);
+        # blank whatever pre-1.3.12 provisioning left behind
+        c.execute("UPDATE devices SET mqtt_password='' WHERE mqtt_password!=''")
         # permissions are symmetric (a pair either talks or it doesn't);
         # both directions are stored so send/contacts queries stay simple.
         # Idempotent, runs every boot: also migrates pre-symmetric rows.

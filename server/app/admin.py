@@ -26,6 +26,8 @@ templates.env.globals["local_auth"] = LOCAL_AUTH
 
 
 def _page(request: Request, name: str, **ctx):
+    # per-request nonce for the templates' inline <script> (CSP, main.py)
+    ctx["csp_nonce"] = getattr(request.state, "csp_nonce", "")
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -33,7 +35,8 @@ def _page(request: Request, name: str, **ctx):
 def _signed_in(user_id: int) -> RedirectResponse:
     resp = RedirectResponse("/admin", status_code=303)
     resp.set_cookie("pip_session", create_session(user_id), httponly=True,
-                    samesite="strict", max_age=30 * 86400)
+                    secure=api.COOKIE_SECURE, samesite="strict",
+                    max_age=30 * 86400, path="/")
     return resp
 
 

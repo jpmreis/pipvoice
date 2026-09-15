@@ -123,13 +123,33 @@ def login_blocked(key: str) -> bool:
     return len(hits) >= _FAIL_LIMIT
 
 
+_MAX_KEYS = 5000        # hard cap; keys include attacker-chosen addresses
+_PURGE_EVERY = 60.0     # a full scan at most this often, never per request
+_last_purge = 0.0
+
+
+def _purge(now: float) -> None:
+    """Drop keys with no hit inside the window; if a flood of distinct
+    keys still leaves the dict over the cap, drop the least recent ones.
+    Time-gated so a flood cannot turn every failure into an O(n) scan."""
+    global _last_purge
+    if now - _last_purge < _PURGE_EVERY:
+        return
+    _last_purge = now
+    for k in list(_failures):
+        if all(now - t >= _FAIL_WINDOW for t in _failures[k]):
+            del _failures[k]
+    if len(_failures) > _MAX_KEYS:
+        oldest = sorted(_failures, key=lambda k: _failures[k][-1])
+        for k in oldest[:len(_failures) - _MAX_KEYS]:
+            del _failures[k]
+
+
 def login_failed(key: str) -> None:
-    _failures.setdefault(key, []).append(time.time())
-    if len(_failures) > 1000:            # purge stale keys, bound memory
-        now = time.time()
-        for k in list(_failures):
-            if all(now - t >= _FAIL_WINDOW for t in _failures[k]):
-                del _failures[k]
+    now = time.time()
+    _failures.setdefault(key, []).append(now)
+    if len(_failures) > 1000:            # bound memory (and CPU: _purge)
+        _purge(now)
 
 
 def login_succeeded(key: str) -> None:

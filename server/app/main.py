@@ -1,7 +1,10 @@
 """Pip server. Run: uvicorn app.main:app --host 127.0.0.1 --port 8080"""
+import base64
+import hashlib
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 
@@ -19,6 +22,24 @@ from .admin import router as admin_router
 from .cleanup import cleanup_loop
 
 logging.basicConfig(level=logging.INFO)
+
+
+class _RedactNonce(logging.Filter):
+    """uvicorn's access line carries the request path; the web flasher's
+    NVS image URL holds a one-shot nonce that fetches a device's raw
+    token, so that path segment must not land in the logs."""
+    _NVS = re.compile(r"(/v1/setup/nvs/)[^/?\s]+")
+
+    def filter(self, record):
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 \
+                and isinstance(args[2], str):
+            record.args = args[:2] + (self._NVS.sub(r"\1<nonce>", args[2]),) \
+                + args[3:]
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactNonce())
 db.init()
 # Theme variants render in a thread: a no-op when cached, but the first
 # boot after a new rendition set (e.g. the per-board sizes) runs ~40
@@ -47,6 +68,56 @@ _APP_CACHE = (("/app/fonts/", "public, max-age=31536000, immutable"),
               ("/app/boards/", "public, max-age=86400"))
 
 
+# ---- Content-Security-Policy ----
+# Every response carries it (Caddy adds the rest of the security headers).
+# Scripts: only our own files plus the inline blocks we ship - the static
+# pages' blocks by content hash (computed once from what we actually
+# serve), the admin templates' by a per-request nonce (their blocks
+# embed data). No inline event handlers anywhere (setup.html's back
+# button moved to setup.js). Styles stay 'unsafe-inline': the PWA builds
+# style="" attributes in JS and the risk there is cosmetic.
+# CSP_HEADER flips between report-only and enforcing; the browser console
+# shows violations either way.
+CSP_HEADER = "Content-Security-Policy-Report-Only"
+_INLINE_SCRIPT = re.compile(r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>",
+                            re.S | re.I)
+
+
+def _script_hashes(html: str) -> list[str]:
+    out = []
+    for m in _INLINE_SCRIPT.finditer(html):
+        if "src=" in m.group("attrs"):
+            continue
+        digest = hashlib.sha256(m.group("body").encode("utf-8")).digest()
+        out.append("'sha256-" + base64.b64encode(digest).decode() + "'")
+    return out
+
+
+@functools.lru_cache(maxsize=None)
+def _static_script_hashes() -> str:
+    """Hashes for the inline scripts of the static HTML we serve: the
+    processed public pages and the PWA's install page (index/setup load
+    external scripts only)."""
+    hashes = []
+    for name in ("home.html", "waitlist.html"):
+        hashes += _script_hashes(_public_page(name))
+    web = os.path.join(os.path.dirname(__file__), "web")
+    for name in ("install.html",):
+        with open(os.path.join(web, name), encoding="utf-8") as f:
+            hashes += _script_hashes(f.read())
+    return " ".join(hashes)
+
+
+def _csp(nonce: str) -> str:
+    return ("default-src 'self'; "
+            f"script-src 'self' 'nonce-{nonce}' {_static_script_hashes()}; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; media-src 'self' blob:; "
+            "connect-src 'self'; font-src 'self'; worker-src 'self'; "
+            "manifest-src 'self'; frame-ancestors 'none'; "
+            "base-uri 'self'; form-action 'self'; object-src 'none'")
+
+
 @app.middleware("http")
 async def _stamp_version(request, call_next):
     # every /v1 response carries the global version, so the PWA notices an
@@ -58,6 +129,7 @@ async def _stamp_version(request, call_next):
     path = request.url.path
     group = stats.route_group(path)
     t0 = time.monotonic()
+    request.state.csp_nonce = secrets.token_urlsafe(16)
     try:
         resp = await call_next(request)
     except Exception:
@@ -78,6 +150,7 @@ async def _stamp_version(request, call_next):
                         detail=f"{request.method} {group}")
         elif resp.status_code >= 400:
             stats.count("req.status", "4xx")
+    resp.headers[CSP_HEADER] = _csp(request.state.csp_nonce)
     if path.startswith("/v1/"):
         resp.headers["X-Pip-Version"] = api.global_version()
     elif path.startswith("/app"):

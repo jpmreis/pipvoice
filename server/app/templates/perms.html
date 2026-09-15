@@ -49,7 +49,7 @@ button:disabled{opacity:.4;cursor:default}
   <span class="note" id="pnote">No changes</span>
 </form>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 const USERS = {{ users | tojson }};
 const pairs = new Set({{ pairs | tojson }}.map(p => p.join("_")));
 const saved = new Set(pairs);

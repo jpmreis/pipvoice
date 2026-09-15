@@ -135,7 +135,7 @@ a box is offline after {{ offline_min }} quiet minutes.</p>
 {% else %}<p class="muted">Nothing logged{% if kind or user or device %} for this filter{% endif %}.</p>{% endif %}
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 const CHARTS = {{ charts | tojson }};
 const SPARK = {{ spark | tojson }};
 const COLORS = ["#ffb300","#4fc3f7","#3ddc84","#f06292","#ba68c8","#ff8a65","#aed581","#90a4ae"];
