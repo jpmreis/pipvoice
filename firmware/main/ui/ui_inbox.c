@@ -85,7 +85,8 @@ static void mk_dnd_banner(void)
 
     lv_obj_t *b = lv_label_create(card);
     lv_label_set_text_fmt(b, "New messages are waiting for you\n"
-                             "and arrive at %u:00.", g_ui.dnd_until_h);
+                             "and arrive at %u:%02u.",
+                          g_ui.dnd_until_min / 60, g_ui.dnd_until_min % 60);
     lv_obj_set_style_text_font(b, FONT_SMALL, 0);
     lv_obj_set_style_text_color(b, COL_TEXT_DIM, 0);
 }

@@ -616,13 +616,31 @@ static void fetch_inbox(void)
 
 static bool clock_set(void) { return time(NULL) >= CLOCK_SANE_EPOCH; }
 
+/* end of the quiet window whose morning is `wday` (0 = Sunday) */
+static uint16_t dnd_end_for(int wday)
+{
+    return (wday >= 1 && wday <= 5) ? DND_END_WEEKDAY_MIN
+                                    : DND_END_WEEKEND_MIN;
+}
+
 bool sync_dnd_active(void)
 {
     if (!clock_set()) return false;        /* no clock: no verdict */
     time_t now = time(NULL);
     struct tm lt;
     localtime_r(&now, &lt);
-    return lt.tm_hour >= DND_START_H || lt.tm_hour < DND_END_H;
+    int mins = lt.tm_hour * 60 + lt.tm_min;
+    return lt.tm_hour >= DND_START_H || mins < dnd_end_for(lt.tm_wday);
+}
+
+uint16_t sync_dnd_end_min(void)
+{
+    time_t now = time(NULL);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    /* evenings belong to tomorrow's morning */
+    int wday = lt.tm_hour >= DND_START_H ? (lt.tm_wday + 1) % 7 : lt.tm_wday;
+    return dnd_end_for(wday);
 }
 
 bool sync_quiet_hold(void)

@@ -17,15 +17,20 @@ typedef struct {
 } sync_events_t;
 
 /* ---- quiet hours: incoming mail is held on the server overnight ----
- * Between DND_START_H and DND_END_H local time the inbox fetch is
- * skipped, so nothing lands (and nothing chimes) until the morning; the
- * server keeps every row and its audio because this box never acks it.
+ * From DND_START_H local time until the morning's end (07:30 before a
+ * weekday, 08:00 before a Saturday or Sunday) the inbox fetch is
+ * skipped, so nothing lands (and nothing chimes) until then; the server
+ * keeps every row and its audio because this box never acks it.
  * Sending, reactions and playback of what is already here are untouched.
  * False until the clock is set - a box booting on a 1970 timestamp must
  * not decide it is 3 a.m. and swallow the day's messages. */
-#define DND_START_H 21
-#define DND_END_H    8
+#define DND_START_H          21
+#define DND_END_WEEKDAY_MIN  (7 * 60 + 30)   /* Mon-Fri mornings */
+#define DND_END_WEEKEND_MIN  (8 * 60)        /* Sat/Sun mornings */
 bool sync_dnd_active(void);      /* definitely quiet hours (for the banner) */
+/* minutes after local midnight at which the current/next quiet window
+ * ends - the morning that follows, so Friday evening already says 8:00 */
+uint16_t sync_dnd_end_min(void);
 
 /* Should anything arriving stay silent right now? Quiet hours, or a
  * fresh boot whose clock hasn't landed yet - "I don't know what time it

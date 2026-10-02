@@ -177,7 +177,24 @@ static void cb_reactions_seen(const char *contact_id)
 
 static bool cb_pin(const char *pin) { return config_check_pin(pin); }
 
-static int8_t cb_wifi_rssi(void) { return net_wifi_rssi(); }
+/* WiFi signal for the status bar. Sampled OFF the LVGL task (power tick,
+ * wifi state changes) and cached: esp_wifi_sta_get_ap_info() is a call
+ * into the WiFi driver that can wait on the WiFi task, and the home
+ * screen used to make it under the LVGL lock while being rebuilt - on a
+ * touch-wake that is the splash -> home transition, which then sat on
+ * the splash for as long as the driver took to answer. */
+static volatile int8_t s_rssi;
+
+static void sample_rssi(void)
+{
+    int64_t t0 = esp_timer_get_time();
+    s_rssi = net_wifi_rssi();
+    int64_t ms = (esp_timer_get_time() - t0) / 1000;
+    if (ms > 50)
+        ESP_LOGW(TAG, "wifi rssi query took %lld ms", (long long)ms);
+}
+
+static int8_t cb_wifi_rssi(void) { return s_rssi; }
 
 static void cb_volume(uint8_t v)
 {
@@ -296,6 +313,7 @@ static void ev_reactions_changed(void)
 
 static void ev_battery(uint8_t pct, bool charging, bool present)
 {
+    sample_rssi();            /* before the lock: may wait on the driver */
     UI_LOCKED(ui_set_battery(pct, charging, present));
 
     /* the battery poll doubles as the 30 s housekeeping tick: keep the
@@ -306,7 +324,7 @@ static void ev_battery(uint8_t pct, bool charging, bool present)
     if (!dnd_known || dnd != dnd_was) {
         dnd_known = true;
         dnd_was = dnd;
-        UI_LOCKED(ui_set_dnd(dnd, DND_END_H));
+        UI_LOCKED(ui_set_dnd(dnd, sync_dnd_end_min()));
         if (!dnd) sync_kick();
     }
 }
@@ -324,6 +342,7 @@ static void ev_wifi(net_state_t st)
             provisioning_stop();
             UI_LOCKED(ui_wifi_setup_finished());
         }
+        sample_rssi();
         UI_LOCKED(ui_set_wifi(UI_WIFI_ONLINE));
         net_mqtt_start();
         sync_kick();
@@ -336,6 +355,7 @@ static void ev_wifi(net_state_t st)
             UI_LOCKED(ui_notice("This WiFi needs a sign-in (Settings)"));
         break;
     case NET_STATE_DOWN:
+        s_rssi = 0;
         UI_LOCKED(ui_set_wifi(s_provisioning ? UI_WIFI_OFFLINE
                                              : UI_WIFI_CONNECTING));
         break;

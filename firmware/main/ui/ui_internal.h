@@ -38,7 +38,7 @@ typedef struct {
     bool            battery_present;
     ui_wifi_state_t wifi;
     bool            dnd;              /* quiet hours: mail held on server */
-    uint8_t         dnd_until_h;      /* local hour it resumes            */
+    uint16_t        dnd_until_min;    /* minutes after midnight it resumes */
 
     ui_theme_info_t themes[UI_MAX_THEMES];   /* picker options from server */
     uint8_t         theme_count;

@@ -250,11 +250,11 @@ void ui_set_wifi(ui_wifi_state_t state)
     ui_offline_eval();
 }
 
-void ui_set_dnd(bool on, uint8_t until_hour)
+void ui_set_dnd(bool on, uint16_t until_min)
 {
-    if (g_ui.dnd == on && g_ui.dnd_until_h == until_hour) return;
+    if (g_ui.dnd == on && g_ui.dnd_until_min == until_min) return;
     g_ui.dnd = on;
-    g_ui.dnd_until_h = until_hour;
+    g_ui.dnd_until_min = until_min;
     scr_home_update_inbox();      /* pill only: don't reset a grid scroll */
     scr_inbox_refresh();
     if (ui_screen_is(SCR_AMBIENT)) scr_ambient_refresh();

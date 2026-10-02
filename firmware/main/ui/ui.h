@@ -131,9 +131,9 @@ void ui_set_contacts(const ui_contact_t *list, uint8_t count);
 void ui_set_inbox(const ui_message_t *list, uint8_t count);
 void ui_set_battery(uint8_t pct, bool charging, bool present);
 void ui_set_wifi(ui_wifi_state_t state);
-/* quiet hours: incoming mail is being held until until_hour (local).
- * Shows the sleeping-inbox banner on home and in the inbox. */
-void ui_set_dnd(bool on, uint8_t until_hour);
+/* quiet hours: incoming mail is being held until until_min minutes after
+ * local midnight. Shows the sleeping-inbox banner on home and in the inbox. */
+void ui_set_dnd(bool on, uint16_t until_min);
 void ui_set_themes(const ui_theme_info_t *list, uint8_t count);
 
 /* Apply (or clear, px == NULL) the background on home/record/inbox.

@@ -10,12 +10,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/). The release
 workflow copies a version's section into the GitHub Release notes, so
 write entries for humans.
 
-## [Unreleased]
+## [1.3.13] — 2026-10-02
 
-Server hardening, round three (audit of 2026-09-15, evening). Server
-only; nothing a family member will notice.
+Quiet hours end earlier on school days, a box no longer hangs on its
+hello after a touch-wake, and the server hardening from the audit of
+2026-09-15 (round three) ships.
+
+### Changed
+- Device quiet hours now end at 07:30 on weekday mornings (Monday to
+  Friday) and stay at 08:00 before a Saturday or Sunday. The start is
+  still 21:00. The inbox banner shows the actual time the held messages
+  will arrive, and a box that has not learned the time yet keeps
+  treating the day as daytime, as before.
 
 ### Fixed
+- Firmware: waking a sleeping box with a touch could leave it on the
+  "Hello" splash for up to half a minute after the animation had
+  finished, then land on home; a power-cycle never did this. The one
+  step of that transition that waits on anything outside the UI was the
+  home screen asking the WiFi driver for the signal strength while being
+  rebuilt under the display lock - a driver call that can block on the
+  WiFi task. At boot the first home render happens before WiFi is up,
+  which fits only wakes stalling. The signal is now sampled by the
+  background tick and cached, so nothing on the UI thread waits on the
+  radio; a slow query is logged (`wifi rssi query took N ms`) so a
+  serial capture can confirm the diagnosis.
 - A device admin could add ANY @username on the server as a contact of
   their box, which writes symmetric permissions - on the hosted
   instance, a way to message a stranger's family by guessing a
