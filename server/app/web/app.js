@@ -920,10 +920,10 @@ function manageCard(d) {
      <p class="small dim mng-gempty" style="display:none">No groups yet.</p>
      <p class="small mng-gcap" style="display:none;color:var(--danger)">The box
        shows at most 12 tiles - groups come first, so a contact may drop off.</p>
-     <div class="mng-addrow">
+     <div class="mng-gaddrow">
        <input class="mng-input mng-ginput" placeholder="New group name"
               maxlength="16">
-       <button class="btn accent mng-gadd">Create</button>
+       <button class="btn accent mng-gadd">Create group</button>
      </div>
      <div class="small mng-gerr" style="color:var(--danger)"></div>
      <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:14px">

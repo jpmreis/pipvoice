@@ -207,6 +207,12 @@ body.themed .msg { background: rgba(22, 22, 28, .82); }  /* faded over bg */
   padding: 2px 9px; border-radius: 10px; }
 .msg .who .name .via { font-weight: 400; color: var(--dim); }
 .mng-groups .msg { background: var(--surface2); }
+/* stacked, not side by side: a full-width button next to the input
+   squeezed the name field to nothing on a phone */
+.mng-gaddrow { display: flex; flex-direction: column; gap: 0; }
+.mng-gaddrow .mng-ginput { width: 100%; box-sizing: border-box;
+  margin: 12px 0 0; }
+.mng-gaddrow .mng-gadd { height: 56px; margin: 10px 0 0; }
 .msg .gedit { height: 52px; padding: 0 10px; background: none; border: 0;
   color: var(--accent); font-weight: 600; font-size: var(--fs-small);
   font-family: inherit; flex: none; }
