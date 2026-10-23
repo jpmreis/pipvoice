@@ -4,6 +4,8 @@
 #pragma once
 #include "esp_netif.h"
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 typedef enum {
     NET_STATE_DOWN,      /* no association / lost IP                     */
@@ -19,6 +21,8 @@ void net_wifi_stop(void);             /* for provisioning mode              */
 bool net_wifi_is_connected(void);     /* online (probe passed)              */
 bool net_wifi_has_ip(void);           /* associated + DHCP done (any state) */
 int8_t net_wifi_rssi(void);           /* AP signal in dBm; 0 = unknown     */
+size_t net_wifi_ssid(char *out, size_t cap); /* joined SSID ("" = none);
+                                                 returns its length (stddef) */
 net_state_t net_wifi_state(void);     /* last reported state                */
 esp_netif_t *net_wifi_netif(void);    /* STA netif (for the setup relay)    */
 

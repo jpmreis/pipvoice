@@ -1,5 +1,6 @@
 """db: SQLite schema + tiny helpers. Single-writer family scale."""
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 
@@ -89,6 +90,19 @@ CREATE TABLE IF NOT EXISTS reactions ( -- one per message, latest wins;
     created TEXT NOT NULL DEFAULT (datetime('now')),
     seen INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS groups (    -- per-box broadcast lists, set up
+    id TEXT PRIMARY KEY,               -- by the box's device admin.
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,                -- 'g-' + 8 hex: can never look like
+    color TEXT NOT NULL DEFAULT 'FFB300',  -- a username ([a-z0-9_])
+    created TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS group_members ( -- the box user is always a row;
+    group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, user_id)    -- others: admin or a box contact
+);                                     -- (prune_group_members)
+CREATE INDEX IF NOT EXISTS group_members_user ON group_members(user_id);
 CREATE TABLE IF NOT EXISTS push_subs (  -- phone users' web push endpoints
     endpoint TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -160,7 +174,62 @@ MIGRATIONS = [
     # the server's current belief, so online/offline transitions can be
     # logged as events (stats.presence_sweep)
     "ALTER TABLE devices ADD COLUMN online INTEGER NOT NULL DEFAULT 0",
+    # the Wi-Fi network a box is on (X-Pip-Diag 's='). Shown only to the
+    # box's device admin via /v1/managed; a personal datum, so it lives on
+    # this row and nowhere else (never in events/hourly, never rendered to
+    # the server admin)
+    "ALTER TABLE devices ADD COLUMN ssid TEXT",
+    # group fan-out: one ordinary row (and audio file) per recipient.
+    # group_id tags the copy for presentation - no FK on purpose, rows
+    # outlive the group. origin = id of the first copy of one send, so the
+    # per-(sender, group) send cap counts sends, not copies.
+    "ALTER TABLE messages ADD COLUMN group_id TEXT",
+    "ALTER TABLE messages ADD COLUMN origin TEXT",
+    "CREATE INDEX IF NOT EXISTS messages_group "
+    "ON messages(sender, group_id, created)",
 ]
+
+# ---------- groups ----------
+GROUP_ID_RE = re.compile(r"g-[0-9a-f]{8}")
+BOX_NAME_BYTES = 23        # firmware UI_NAME_LEN - 1: what a box can show
+
+
+def is_group_id(s: str) -> bool:
+    return bool(s) and GROUP_ID_RE.fullmatch(s) is not None
+
+
+def clip_utf8(s: str, n: int) -> str:
+    """Longest prefix of s that fits n bytes without splitting a codepoint
+    (the firmware's strlcpy would)."""
+    b = s.encode("utf-8")
+    return s if len(b) <= n else b[:n].decode("utf-8", "ignore")
+
+
+def group_label(sender_name: str, group_name: str) -> str:
+    """'Sender · Group' as the box's sender_name, within its 23 B budget.
+    The group name wins: it is what the tile and the reply are about."""
+    sep = " · "                         # 4 bytes
+    budget = BOX_NAME_BYTES - len(sep.encode()) - len(group_name.encode())
+    if budget >= 3:
+        return clip_utf8(sender_name, budget) + sep + group_name
+    return clip_utf8(group_name, BOX_NAME_BYTES)
+
+
+def prune_group_members(c) -> int:
+    """Membership invariant: a member is the box itself, its device admin,
+    or a current contact of the box (perms box -> user). Runs after
+    anything that can shrink the perms matrix or change the admin, and at
+    boot. Idempotent; returns rows removed."""
+    cur = c.execute("""DELETE FROM group_members WHERE rowid IN (
+        SELECT gm.rowid FROM group_members gm
+          JOIN groups g ON g.id = gm.group_id
+          JOIN devices d ON d.id = g.device_id
+         WHERE gm.user_id != d.user_id
+           AND gm.user_id IS NOT d.admin_id
+           AND NOT EXISTS (SELECT 1 FROM perms p
+                           WHERE p.sender = d.user_id
+                             AND p.recipient = gm.user_id))""")
+    return cur.rowcount
 
 
 def init():
@@ -214,6 +283,7 @@ def init():
         # Idempotent, runs every boot: also migrates pre-symmetric rows.
         c.execute("""INSERT OR IGNORE INTO perms (sender, recipient)
                      SELECT recipient, sender FROM perms""")
+        prune_group_members(c)
         # rows acked before the delivered_at column existed: stamp them now
         # so delete-on-delivery picks them up after the normal grace window
         c.execute("""UPDATE messages SET delivered_at=datetime('now')

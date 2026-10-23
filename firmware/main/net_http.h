@@ -7,8 +7,8 @@
 #include "ui.h"
 
 /* attach the X-Pip-Diag vitals header (version, board, RSSI, heap,
- * uptime, reset reason) to a request; every client built here gets it,
- * ota.c adds it to the clients it builds itself */
+ * uptime, reset reason, SSID) to a request; every client built here gets
+ * it, ota.c adds it to the clients it builds itself */
 void net_http_add_diag(esp_http_client_handle_t c);
 
 typedef struct {

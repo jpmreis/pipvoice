@@ -408,10 +408,12 @@ async function loadContacts() {
   el.innerHTML = "";
   for (const c of contacts) {
     const b = document.createElement("button");
-    b.className = "contact";
+    b.className = "contact" + (c.group ? " group" : "");
     b.dataset.id = c.device_id;
     const initial = (c.name || "?").charAt(0).toUpperCase();
-    b.innerHTML = `<span class="avatar" style="background:#${esc(c.color)}">${esc(initial)}</span>
+    // a group is a tile like any other (same id/record/send path); the
+    // badge is the only thing that says several people are behind it
+    b.innerHTML = `<span class="avatar" style="background:#${esc(c.color)}">${esc(initial)}${c.group ? '<span class="gbadge">group</span>' : ""}</span>
                    <span class="cname">${esc(c.name)}</span>`;
     b.onclick = () => openRecord(c);
     el.appendChild(b);
@@ -550,10 +552,16 @@ async function loadInbox() {
   for (const m of inbox) {
     const row = document.createElement("div");
     row.className = "msg" + (m.delivered ? "" : " unheard");
-    const senderInitial = (m.sender_name || "?").charAt(0).toUpperCase();
+    // a group copy: the person first, the group as a quiet suffix (the
+    // server's sender_name is the box's 23-byte "Sender · Group" form)
+    const who = m.group
+      ? `${esc(m.from_name)} <span class="via">&middot; ${esc(m.group.name)}</span>`
+      : esc(m.sender_name);
+    const senderInitial = ((m.group ? m.from_name : m.sender_name) || "?")
+      .charAt(0).toUpperCase();
     row.innerHTML =
       `<span class="cdot" style="background:#${esc(m.sender_color)}">${esc(senderInitial)}</span>
-       <span class="who"><span class="name">${esc(m.sender_name)}</span><br>
+       <span class="who"><span class="name">${who}</span><br>
          <span class="meta">${esc(fmtWhen(m))} &middot; ${fmtDur(m.duration)}</span></span>
        <span class="react-badge"></span>
        <button class="play">&#9654;&#xFE0E;</button>
@@ -647,7 +655,8 @@ async function playMessage(m, row) {
 }
 
 async function delMessage(m, row) {
-  if (!confirm(`Delete the message from ${m.sender_name}?`)) return;
+  const who = m.group ? `${m.from_name} (${m.group.name})` : m.sender_name;
+  if (!confirm(`Delete the message from ${who}?`)) return;
   if (playingRow === row) stopPlayback();
   await api(`/messages/${m.id}`, { method: "DELETE" });
   forgetAudio(m.id);
@@ -891,6 +900,9 @@ function manageCard(d) {
   card.innerHTML =
     `<div style="font-weight:600">${esc(d.name)}</div>
      <div class="small dim">@${esc(d.username)} &middot; ${esc(d.device_id)}</div>
+     <div class="small dim">Wi-Fi: ${d.ssid ? esc(d.ssid) : "not reported yet"}${
+       d.rssi ? " &middot; " + esc(String(d.rssi)) + " dBm" : ""}${
+       d.fw_version ? " &middot; v" + esc(d.fw_version) : ""}</div>
      <div class="small dim" style="font-weight:600;margin-top:14px">CAN EXCHANGE MESSAGES WITH</div>
      <div class="mng-contacts"></div>
      <p class="small dim mng-empty" style="display:none">Nobody yet - add an @username below.</p>
@@ -900,6 +912,20 @@ function manageCard(d) {
        <button class="btn accent mng-add">Add</button>
      </div>
      <div class="small mng-err" style="color:var(--danger)"></div>
+     <div class="small dim" style="font-weight:600;margin-top:14px">GROUPS</div>
+     <p class="small dim" style="margin:6px 0 0">One message to several people at
+       once. A group is a tile on the box; anyone in it can send, and
+       everyone else in it gets the message.</p>
+     <div class="mng-groups"></div>
+     <p class="small dim mng-gempty" style="display:none">No groups yet.</p>
+     <p class="small mng-gcap" style="display:none;color:var(--danger)">The box
+       shows at most 12 tiles - groups come first, so a contact may drop off.</p>
+     <div class="mng-addrow">
+       <input class="mng-input mng-ginput" placeholder="New group name"
+              maxlength="16">
+       <button class="btn accent mng-gadd">Create</button>
+     </div>
+     <div class="small mng-gerr" style="color:var(--danger)"></div>
      <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:14px">
        <input type="checkbox" class="mng-voice" ${d.voice ? "checked" : ""}>
        <span style="flex:1;min-width:0">Voice control (accessibility)
@@ -992,7 +1018,127 @@ function manageCard(d) {
   addBtn.onclick = add;
   input.addEventListener("keydown", e => { if (e.key === "Enter") add(); });
 
+  /* ---- groups: the box's contacts (and you) in named broadcast lists ---- */
+  const gwrap = card.querySelector(".mng-groups");
+  const gempty = card.querySelector(".mng-gempty");
+  const gcap = card.querySelector(".mng-gcap");
+  const gerr = card.querySelector(".mng-gerr");
+  const ginput = card.querySelector(".mng-ginput");
+  const gaddBtn = card.querySelector(".mng-gadd");
+  d.groups = d.groups || [];
+  const gapi = (path, method, body) => api(`/managed/${d.device_id}/groups${path}`, {
+    method, headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const gfail = e =>
+    e.status === 400 ? "Name must be 1-16 characters, and a box has at most 8 groups" :
+    e.status === 403 ? "Only this box's contacts can be in its groups" :
+    e.status === 404 ? "Someone on that list is no longer a contact" :
+    "Could not save - try again";
+  // who may be in a group: you, plus whoever the box talks with
+  const candidates = () => {
+    const seen = new Set(), out = [];
+    for (const x of [{ username: me.username, name: `You (${me.display_name})` },
+                     ...d.contacts]) {
+      if (seen.has(x.username)) continue;
+      seen.add(x.username);
+      out.push(x);
+    }
+    return out;
+  };
+
+  const renderGroups = (editing = null) => {
+    gwrap.innerHTML = "";
+    gempty.style.display = d.groups.length ? "none" : "block";
+    gcap.style.display = d.contacts.length + d.groups.length > 12 ? "block" : "none";
+    for (const g of d.groups) {
+      const row = document.createElement("div");
+      row.className = "msg";
+      const initial = (g.name || "?").charAt(0).toUpperCase();
+      const who = g.members.length
+        ? g.members.map(m => m.username === me.username ? "you" : m.name).join(", ")
+        : "nobody yet - tap Edit";
+      row.innerHTML =
+        `<span class="cdot" style="background:#${esc(g.color)}">${esc(initial)}</span>
+         <span class="who"><span class="name">${esc(g.name)}</span><br>
+           <span class="meta">${esc(who)}</span></span>
+         <button class="gedit">Edit</button>
+         <button class="del">&#10005;</button>`;
+      row.querySelector(".gedit").onclick = () => renderGroups(g.id);
+      row.querySelector(".del").onclick = async () => {
+        if (!confirm(`Delete the group ${g.name}? Messages already delivered stay.`)) return;
+        try {
+          await gapi(`/${g.id}`, "DELETE");
+          d.groups = d.groups.filter(x => x.id !== g.id);
+          renderGroups();
+          toast(`${g.name} deleted`);
+        } catch (e) { toast("Could not delete - try again", "danger"); }
+      };
+      gwrap.appendChild(row);
+      if (editing !== g.id) continue;
+
+      // inline editor: rename + tick the members
+      const panel = document.createElement("div");
+      panel.className = "mng-gpanel";
+      const inMembers = new Set(g.members.map(m => m.username));
+      panel.innerHTML =
+        `<input class="gname" maxlength="16" value="${esc(g.name)}" placeholder="Group name">
+         <div class="gmembers"></div>
+         <div class="row">
+           <button class="btn accent gsave">Save</button>
+           <button class="btn ghost gcancel">Cancel</button>
+         </div>
+         <div class="small gperr" style="color:var(--danger)"></div>`;
+      const list = panel.querySelector(".gmembers");
+      for (const cnd of candidates()) {
+        const lab = document.createElement("label");
+        lab.className = "small";
+        lab.innerHTML = `<input type="checkbox" value="${esc(cnd.username)}"
+                           ${inMembers.has(cnd.username) ? "checked" : ""}>
+                         <span>${esc(cnd.name)}</span>`;
+        list.appendChild(lab);
+      }
+      panel.querySelector(".gcancel").onclick = () => renderGroups();
+      panel.querySelector(".gsave").onclick = async () => {
+        const perr = panel.querySelector(".gperr");
+        perr.textContent = "";
+        const members = [...list.querySelectorAll("input:checked")].map(i => i.value);
+        const name = panel.querySelector(".gname").value.trim();
+        panel.querySelector(".gsave").disabled = true;
+        try {
+          const r = await gapi(`/${g.id}`, "PATCH", { name, members });
+          Object.assign(g, r.group);
+          renderGroups();
+          toast(`${g.name} saved`, "ok");
+        } catch (e) {
+          perr.textContent = gfail(e);
+          panel.querySelector(".gsave").disabled = false;
+        }
+      };
+      gwrap.appendChild(panel);
+    }
+  };
+
+  const gadd = async () => {
+    gerr.textContent = "";
+    const name = ginput.value.trim();
+    if (!name) return;
+    gaddBtn.disabled = true;
+    try {
+      const r = await gapi("", "POST", { name, members: [] });
+      ginput.value = "";
+      d.groups.push(r.group);
+      renderGroups(r.group.id);        // straight into picking members
+      toast(`${r.group.name} created - now pick who is in it`, "ok");
+    } catch (e) {
+      gerr.textContent = gfail(e);
+    } finally { gaddBtn.disabled = false; }
+  };
+  gaddBtn.onclick = gadd;
+  ginput.addEventListener("keydown", e => { if (e.key === "Enter") gadd(); });
+
   render();
+  renderGroups();
   return card;
 }
 

@@ -26,17 +26,26 @@ static const char *TAG = "http";
  * simply ignores the header. Keys are a firmware<->server contract
  * (server/app/stats.py parse_diag): v firmware version, b board key,
  * r wifi RSSI dBm (0 = unknown), h free internal heap, m largest free
- * internal block, u uptime seconds, rr esp_reset_reason_t. */
+ * internal block, u uptime seconds, rr esp_reset_reason_t, s the SSID we
+ * are on, hex-encoded (an SSID may hold ';' '=' or any UTF-8; the server
+ * decodes it and shows it only to the box's device admin). */
 void net_http_add_diag(esp_http_client_handle_t c)
 {
-    char diag[128];
-    snprintf(diag, sizeof(diag), "v=%s;b=%s;r=%d;h=%u;m=%u;u=%u;rr=%d",
-             esp_app_get_description()->version, PIP_BOARD_NAME,
-             (int)net_wifi_rssi(),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-             (unsigned)(esp_timer_get_time() / 1000000),
-             (int)esp_reset_reason());
+    char diag[192];       /* ~78 B of vitals + ";s=" + up to 64 hex */
+    int n = snprintf(diag, sizeof(diag), "v=%s;b=%s;r=%d;h=%u;m=%u;u=%u;rr=%d",
+                     esp_app_get_description()->version, PIP_BOARD_NAME,
+                     (int)net_wifi_rssi(),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                     (unsigned)(esp_timer_get_time() / 1000000),
+                     (int)esp_reset_reason());
+    char ssid[33];
+    if (n > 0 && n < (int)sizeof(diag) - 4 && net_wifi_ssid(ssid, sizeof ssid)) {
+        n += snprintf(diag + n, sizeof(diag) - n, ";s=");
+        for (const unsigned char *p = (const unsigned char *)ssid;
+             *p && n + 2 < (int)sizeof(diag); p++)
+            n += snprintf(diag + n, sizeof(diag) - n, "%02x", *p);
+    }
     esp_http_client_set_header(c, "X-Pip-Diag", diag);
 }
 

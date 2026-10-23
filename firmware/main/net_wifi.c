@@ -15,6 +15,9 @@ static const char *TAG = "wifi";
 static wifi_state_cb_t s_cb;
 static bool            s_connected;      /* probe passed - really online */
 static bool            s_has_ip;
+static char            s_ssid[33];   /* AP we hold an IP from; "" if none.
+                                      * Cached at GOT_IP so the HTTP path
+                                      * never asks the WiFi driver (1.3.13) */
 static net_state_t     s_last = NET_STATE_DOWN;
 static bool            s_enabled;
 static uint32_t        s_backoff_ms = 1000;
@@ -42,6 +45,15 @@ int8_t net_wifi_rssi(void)
     wifi_ap_record_t ap;
     if (!s_has_ip || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return 0;
     return ap.rssi;
+}
+
+/* Name of the network we are on, for the device admin's "why did it go
+ * quiet" view (X-Pip-Diag s=). A copy of the cache - no driver call. */
+size_t net_wifi_ssid(char *out, size_t cap)
+{
+    if (!cap) return 0;
+    strlcpy(out, s_has_ip ? s_ssid : "", cap);
+    return strlen(out);
 }
 
 /* report a state to the app only on transitions (disconnect storms and
@@ -85,6 +97,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         s_has_ip = false;
+        s_ssid[0] = 0;
         net_check_stop();
         report(NET_STATE_DOWN);
         if (s_enabled) {
@@ -113,6 +126,16 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         s_has_ip = true;
+        /* event-task context: asking the driver here is fine (it is the
+         * UI thread that must never wait on it). The AP record is what we
+         * actually joined; the configured entry is the fallback. */
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK && ap.ssid[0])
+            strlcpy(s_ssid, (const char *)ap.ssid, sizeof s_ssid);
+        else if (s_net_idx < s_net_count)
+            strlcpy(s_ssid, s_nets[s_net_idx].ssid, sizeof s_ssid);
+        else
+            s_ssid[0] = 0;
         s_backoff_ms = 1000;
         s_net_fails = 0;
         s_pinned = false;         /* joined: normal rotation resumes */
@@ -181,6 +204,7 @@ void net_wifi_stop(void)
     net_check_stop();
     esp_wifi_stop();
     s_has_ip = false;
+    s_ssid[0] = 0;
     s_pinned = false;
     s_pin_failed = false;
     report(NET_STATE_DOWN);

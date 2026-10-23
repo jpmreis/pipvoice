@@ -10,6 +10,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/). The release
 workflow copies a version's section into the GitHub Release notes, so
 write entries for humans.
 
+## [1.4.0] — 2026-10-23
+
+Groups: one message to several people at once. And the grown-up who
+manages a box can now see which Wi-Fi network it is on.
+
+### Added
+- **Groups.** On the app's Manage screen, a box's device admin can set
+  up to eight groups per box from that box's existing contacts (plus
+  themselves). A group is a tile like any other, on the box and in the
+  app: anyone in it can record to it, and everyone else in it gets the
+  message. On a box the message arrives from the group's tile, labelled
+  "Ana · Family", so Reply goes back to the whole group. Removing a
+  contact from the box removes them from its groups too, and so does a
+  change to the server admin's permissions matrix. Each recipient gets
+  their own copy, which lives and dies by the usual rules (delete on
+  delivery, 30-day age-out). Sending to a group has its own cap (five
+  per five minutes per group) that does not touch anyone's direct
+  channel. Server-side only - boxes need no update, though a box only
+  shows its first twelve tiles and groups come first.
+- **Wi-Fi on the Manage screen.** Each managed box now shows the
+  network it is on, its signal, and its firmware version - for "why did
+  Grandma's box go quiet". Needs firmware 1.4.0 on the box; older
+  boxes show "not reported yet". The network name is kept on the device
+  row only and shown to that box's device admin and nobody else.
+
+### Changed
+- Firmware: the `X-Pip-Diag` vitals header gains `s=` (the SSID, hex
+  encoded). Older servers ignore it.
+- The inbox API carries `from`, `from_name` and `group` next to the
+  existing sender fields; the `POST /v1/messages` reply gains `copies`.
+  Older clients ignore both.
+
 ## [1.3.13] — 2026-10-02
 
 Quiet hours end earlier on school days, a box no longer hangs on its

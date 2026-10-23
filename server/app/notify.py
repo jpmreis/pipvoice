@@ -63,14 +63,22 @@ def _device_payload(msg_id: str) -> str:
     a truncated payload just degrades to the old list-then-fetch path."""
     with db.conn() as c:
         m = db.one(c, """SELECT m.duration, m.created, u.username,
-                                u.display_name, u.color
+                                u.display_name, u.color,
+                                g.id AS gid, g.name AS gname, g.color AS gcolor
                          FROM messages m JOIN users u ON u.id=m.sender
+                         LEFT JOIN groups g ON g.id=m.group_id
                          WHERE m.id=?""", (msg_id,))
     if not m:
         return json.dumps({"msg_id": msg_id})
-    return json.dumps({"msg_id": msg_id, "from": m["username"],
-                       "from_name": m["display_name"],
-                       "color": m["color"] or "999999",
+    if m["gid"]:
+        # same identity rule as GET /inbox: a group copy comes from the
+        # group's tile, labelled "Sender · Group" (<= 23 B, the box's limit)
+        who, name, color = (m["gid"], db.group_label(m["display_name"],
+                                                     m["gname"]), m["gcolor"])
+    else:
+        who, name, color = m["username"], m["display_name"], m["color"]
+    return json.dumps({"msg_id": msg_id, "from": who, "from_name": name,
+                       "color": color or "999999",
                        "ts": _epoch(m["created"]),
                        "dur": m["duration"] or 0}, separators=(",", ":"))
 
@@ -86,7 +94,10 @@ def unread_count(user_id: int) -> int:
                       (user_id,))["n"]
 
 
-def message_created(recipient_id: int, msg_id: str, sender_name: str) -> None:
+def message_created(recipient_id: int, msg_id: str, sender_name: str,
+                    group_name: str | None = None) -> None:
+    """One call per recipient copy; group_name set when this copy is a
+    group fan-out (the box payload carries that itself)."""
     if is_device_user(recipient_id):
         mqtt.notify_user(recipient_id, _device_payload(msg_id))
         return
@@ -96,13 +107,16 @@ def message_created(recipient_id: int, msg_id: str, sender_name: str) -> None:
     vmsg.ensure_playback(msg_id)
     # title is the sender: iOS already shows the app name ("Pip") on the
     # banner, so a "Pip" title would just repeat it
+    to = f" to {group_name}" if group_name else ""
     accepted = push.send_to_user(recipient_id, {
-        "title": sender_name, "body": "New voice message",
+        "title": sender_name, "body": f"New voice message{to}",
         "msg_id": msg_id, "unread": unread_count(recipient_id)})
     if accepted == 0:
         send_email(recipient_id,
-                   f"{sender_name} sent you a voice message on Pip",
-                   f"{sender_name} sent you a voice message.\n\n"
+                   f"{sender_name} sent {'a' if group_name else 'you a'} "
+                   f"voice message{to} on Pip",
+                   f"{sender_name} sent {'a' if group_name else 'you a'} "
+                   f"voice message{to}.\n\n"
                    f"Listen here: {app_url()}\n", tag="new")
 
 

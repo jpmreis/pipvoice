@@ -28,6 +28,7 @@ RULES
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -52,6 +53,8 @@ RESET_REASONS = {0: "unknown", 1: "poweron", 2: "ext", 3: "sw", 4: "panic",
                  5: "int_wdt", 6: "task_wdt", 7: "wdt", 8: "deepsleep",
                  9: "brownout", 10: "sdio", 11: "usb", 12: "jtag",
                  13: "efuse", 14: "pwr_glitch", 15: "cpu_lockup"}
+
+_HEX = re.compile(r"[0-9a-fA-F]*")
 
 _counters: dict = {}          # (hour, metric, dim) -> [n, total, lo, hi]
 _lock = threading.Lock()
@@ -143,8 +146,10 @@ def flush() -> int:
 
 # ---------- device diagnostics ----------
 def parse_diag(header: str) -> dict:
-    """'v=1.3.8;b=amoled-1.8;r=-61;h=91234;m=31700;u=3600;rr=1' -> dict.
-    Every key optional; anything malformed is ignored, never fatal."""
+    """'v=1.3.8;b=amoled-1.8;r=-61;h=91234;m=31700;u=3600;rr=1;s=4a3136'
+    -> dict. Every key optional; anything malformed is ignored, never
+    fatal. ``s`` is the SSID, hex-encoded by the box because an SSID may
+    contain ';' '=' or any UTF-8 (firmware 1.4.0+)."""
     out = {}
     for part in (header or "").split(";"):
         k, _, v = part.strip().partition("=")
@@ -154,6 +159,10 @@ def parse_diag(header: str) -> dict:
         if k in ("v", "b"):
             if len(v) <= 32:
                 out[k] = v
+        elif k == "s":
+            if len(v) <= 64 and len(v) % 2 == 0 and _HEX.fullmatch(v):
+                out[k] = bytes.fromhex(v).decode("utf-8", "replace") \
+                              .replace("\x00", "")[:32]
         elif k in ("r", "h", "m", "u", "rr"):
             try:
                 n = int(v)
@@ -194,6 +203,9 @@ def device_diag(c, device_id: str, board: str, header: str,
     if "rr" in d:
         sets.append("reset=?")
         args.append(RESET_REASONS.get(d["rr"], str(d["rr"])))
+    if "s" in d:                     # row only: an SSID is a personal datum
+        sets.append("ssid=?")        # (see RULES) - no event, no counter
+        args.append(d["s"])
     if "u" in d:
         boot_at = now - timedelta(seconds=max(d["u"], 0))
         sets.append("boot_at=?")

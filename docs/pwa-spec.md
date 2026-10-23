@@ -188,3 +188,96 @@ existing device/web variants; served at `/v1/themes/{name}/thumb.bin`.
   prunes files that stopped matching the server list. The picker loads each
   thumb once into a kept PSRAM slot (~28.5 KB per theme, never internal RAM);
   until a thumb lands the tile falls back to the theme's label.
+
+## Device admin: managed boxes, Wi-Fi, groups (as built, 2026-10-23)
+
+A *device admin* is the phone user in `devices.admin_id`. The Settings
+screen shows "Manage device(s)" when `/v1/me` carries a non-empty
+`managed` list; `GET /v1/managed` is the data behind the Manage screen.
+
+### Managed list
+
+`GET /v1/managed` → one card per box:
+
+```
+{device_id, username, name, last_seen, online, fw_version, ssid, rssi,
+ voice, contacts: [{username, name, color}],
+ groups: [{id, name, color, members: [{username, name, color}]}]}
+```
+
+- `ssid`/`rssi`/`fw_version` come from the box's `X-Pip-Diag` header
+  (`s=` is the hex-encoded SSID, firmware ≥ 1.4.0; older boxes leave
+  `ssid` null and the card says "not reported yet"). The SSID lives on
+  the `devices` row only - never in analytics events, never on the
+  server-admin pages - and is returned to this box's device admin and
+  nobody else.
+- Contacts: `POST /v1/managed/{id}/contacts {username}` (consent rule:
+  the target must already talk with the admin, or be the admin),
+  `DELETE /v1/managed/{id}/contacts/{username}`.
+
+### Groups
+
+A group is a per-box broadcast list the device admin curates from the
+box's existing contacts plus themselves; the box user is always a
+member. Membership is the permission: any member can send to the group
+and every *other* member receives the message. There is no pairwise
+check between members - the admin's curation is the consent.
+
+- `GET /v1/managed/{id}/groups`
+- `POST /v1/managed/{id}/groups {name, members?: [usernames], color?}`
+  → `{ok, group}`. Name 1–16 characters and ≤ 20 UTF-8 bytes; at most 8
+  groups per box; each member must be the admin or a current contact of
+  the box (403 otherwise; 404 for an unknown username).
+- `PATCH /v1/managed/{id}/groups/{gid} {name?, members?}` - `members`
+  replaces the whole set.
+- `DELETE /v1/managed/{id}/groups/{gid}`.
+- Every change sends the non-retained `{"event":"contacts"}` notify to
+  the affected members' boxes and re-renders voice prompts
+  (`ask_send-<group id>`).
+- Membership invariant (`db.prune_group_members`): a member is the box
+  user, the admin, or has a perms row *box → user*. It runs at boot,
+  after a managed contact removal, after the server admin's permissions
+  matrix save (which rewrites `perms` wholesale) and after a device-admin
+  reassignment. Deleting a device cascades its groups.
+
+**To every client a group is just a contact.** `GET /v1/contacts` lists
+groups the caller belongs to *first* (`{device_id: "g-xxxxxxxx", name,
+color, group: true}`), then people. Group ids are `g-` + 8 hex, which a
+username (`[a-z0-9_]{2,24}`) can never look like; the firmware keeps only
+the first `UI_MAX_CONTACTS` (12) entries, so groups go first - a group
+tile the box cannot see is a message it cannot reply to. Recording,
+presence (`POST /v1/presence {to: <group id>}` fans out to the other
+members with `from` = the group id) and sending all use the id unchanged.
+
+**A group send is N ordinary messages.** `POST /v1/messages
+recipient_id=<group id>` writes one `.vmsg` copy *per other member*
+(all on disk before any row exists - a notify is a promise the bytes are
+fetchable), then one `messages` row per copy with `group_id` and
+`origin` (= the id of the first copy), then one notify per copy. The
+response is `{id: <origin>, copies: N}`. Every copy then lives and dies
+by the normal rules (delete-on-delivery, 30-day age-out, orphan sweep,
+`drop_audio`); nothing downstream special-cases groups. Send cap: 5
+sends per 5 minutes per (sender, group), counted as `DISTINCT origin`;
+the direct cap ignores group copies (`group_id IS NULL`).
+
+**Identity on arrival.** `GET /v1/inbox` and the box's MQTT notify
+present a group copy with *group identity*: `sender_id` = group id,
+`sender_name` = `"Sender · Group"` (clipped on a codepoint boundary to
+≤ 23 bytes, the firmware's `UI_NAME_LEN` - the group name wins when the
+sender cannot fit; `db.group_label`), `sender_color` = the group's
+colour. So an unchanged box files the message under the group tile and
+Reply records back to the group. The real sender rides along in `from`
+/ `from_name`, and `group: {id, name, color}` (null for direct
+messages); the PWA shows "Ana · Family" from those. A copy whose group
+was deleted falls back to a plain direct message from the real sender.
+Reactions go to the real sender (the row's `sender`), as always.
+
+### Web app
+
+Manage card: name, `@username · device_id`, a Wi-Fi line (SSID, RSSI,
+firmware), the contact list, a GROUPS section (list with member names,
+Edit opens an inline rename + member checkboxes over "You" + the box's
+contacts, × deletes; Create makes a group and opens its editor), a
+warning when contacts + groups exceed the box's 12 tiles, the voice
+toggle and the re-flash link. Home: group tiles carry a "group" badge;
+inbox rows for group copies show the person with "· Group" after it.

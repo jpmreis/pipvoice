@@ -146,8 +146,21 @@ Deployment-specific operator notes live in `CLAUDE.local.md` (untracked).
   Never log codes/tokens/emails/IPs/raw paths. Never call `event()`
   without `c=` inside an open `db.conn()` block (nested connection waits
   on the write lock). The firmware's `X-Pip-Diag` header keys
-  (`v b r h m u rr`, `net_http_add_diag`) are a contract with
-  `stats.parse_diag` — change both. DB is WAL mode since 1.3.8.
+  (`v b r h m u rr s`, `net_http_add_diag`) are a contract with
+  `stats.parse_diag` — change both. `s` is the hex-encoded SSID: it
+  lives on `devices.ssid` only (shown to the box's device admin via
+  `/v1/managed`), never in events/hourly/daily or admin templates. DB
+  is WAL mode since 1.3.8.
+- Groups (`groups`/`group_members`, per box, curated by the device
+  admin) are **server-only**: to every client a group is a contact
+  whose id is `g-<8 hex>` (a username can never contain `-`). A group
+  send is N ordinary `messages` rows + N audio copies (`group_id`,
+  `origin`) — never special-case cleanup/drop_audio. A box sees a
+  group copy with `sender_id` = group id and `sender_name` =
+  `"Sender · Group"` (≤ 23 B, `db.group_label`) so Reply targets the
+  group tile; groups come first in `/v1/contacts` because the box keeps
+  only 12. Membership invariant (box user, admin, or a box contact) is
+  `db.prune_group_members` — call it after anything that shrinks perms.
 - Security invariants (audit 2026-09-15): every ingest path decodes
   audio under `vmsg.MAX_MSG_S` with subprocess timeouts (a 4 MB upload
   once meant 2.7 GB of PCM); push endpoints are allowlisted

@@ -27,30 +27,44 @@ def set_recording(sender_id: int, to_username: str, state: str) -> bool:
     """Record (or clear) that sender is recording to to_username, and fan
     the event out to that user's devices. False when not permitted."""
     with db.conn() as c:
-        rcpt = db.one(c, "SELECT id FROM users WHERE username=?",
-                      (to_username,))
-        if not rcpt:
-            return False
-        # presence flows in the message direction: only leak it along an
-        # allowed sender->recipient edge of the perms matrix
-        allowed = db.one(c, "SELECT 1 FROM perms WHERE sender=? AND recipient=?",
-                         (sender_id, rcpt["id"]))
-        if not allowed:
-            return False
         u = db.one(c, "SELECT username, display_name FROM users WHERE id=?",
                    (sender_id,))
-    with _lock:
-        peers = _state.setdefault(rcpt["id"], {})
-        if state == "start":
-            peers[sender_id] = (u["username"], u["display_name"],
-                                time.monotonic() + TTL)
+        if db.is_group_id(to_username):
+            # recording to a group: every other member's tile for the
+            # group lights up (clients match presence by tile id, so
+            # 'from' is the group, 'from_name' the person)
+            members = [r["user_id"] for r in db.all_(
+                c, "SELECT user_id FROM group_members WHERE group_id=?",
+                (to_username,))]
+            if sender_id not in members:
+                return False
+            targets = [m for m in members if m != sender_id]
+            key, shown = f"{to_username}:{sender_id}", to_username
         else:
-            peers.pop(sender_id, None)
+            rcpt = db.one(c, "SELECT id FROM users WHERE username=?",
+                          (to_username,))
+            if not rcpt:
+                return False
+            # presence flows in the message direction: only leak it along
+            # an allowed sender->recipient edge of the perms matrix
+            allowed = db.one(c, "SELECT 1 FROM perms WHERE sender=? AND recipient=?",
+                             (sender_id, rcpt["id"]))
+            if not allowed:
+                return False
+            targets, key, shown = [rcpt["id"]], sender_id, u["username"]
+    with _lock:
+        for t in targets:
+            peers = _state.setdefault(t, {})
+            if state == "start":
+                peers[key] = (shown, u["display_name"], time.monotonic() + TTL)
+            else:
+                peers.pop(key, None)
     # republished on every keepalive: the device side refreshes its own
     # display TTL from each event
-    mqtt.notify_user(rcpt["id"], json.dumps(
-        {"event": "recording", "from": u["username"],
-         "from_name": u["display_name"], "state": state}))
+    payload = json.dumps({"event": "recording", "from": shown,
+                          "from_name": u["display_name"], "state": state})
+    for t in targets:
+        mqtt.notify_user(t, payload)
     return True
 
 

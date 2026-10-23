@@ -587,6 +587,9 @@ async def perms_save(request: Request, ident: Identity = AdminDep):
                               (int(s), int(r)))
                     c.execute("INSERT OR IGNORE INTO perms VALUES (?,?)",
                               (int(r), int(s)))
+        # a group may only hold a box's contacts: drop whoever just
+        # stopped being one
+        db.prune_group_members(c)
     # boxes refetch contacts right away; NOT retained (a retained message
     # here would replace the retained firmware notify on the same topic)
     mqtt.notify_all('{"event":"contacts"}', retain=False)
@@ -613,6 +616,8 @@ def devices_set_admin(device_id: str, ident: Identity = AdminDep,
     with db.conn() as c:
         c.execute("UPDATE devices SET admin_id=? WHERE id=?",
                   (int(admin_id) if admin_id else None, device_id))
+        # the old admin was in the box's groups by office, not as a contact
+        db.prune_group_members(c)
     return RedirectResponse("/admin/devices", status_code=303)
 
 

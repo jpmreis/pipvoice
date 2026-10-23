@@ -198,6 +198,26 @@ body.themed .msg { background: rgba(22, 22, 28, .82); }  /* faded over bg */
   align-items: center; justify-content: center; font-size: 17px; }
 .rchip.txt { font-size: 12px; font-weight: 700; color: var(--accent); }
 
+/* groups: a tile like any other, marked by a badge; "via group" in the
+   inbox; and the device admin's group editor on the manage card */
+.contact.group .avatar { border-radius: 30px; }
+.contact .gbadge { position: absolute; bottom: -6px; left: 50%;
+  transform: translateX(-50%); font-size: 11px; font-weight: 700;
+  letter-spacing: .02em; background: var(--surface2); color: var(--text);
+  padding: 2px 9px; border-radius: 10px; }
+.msg .who .name .via { font-weight: 400; color: var(--dim); }
+.mng-groups .msg { background: var(--surface2); }
+.msg .gedit { height: 52px; padding: 0 10px; background: none; border: 0;
+  color: var(--accent); font-weight: 600; font-size: var(--fs-small);
+  font-family: inherit; flex: none; }
+.mng-gpanel { background: var(--surface2); border-radius: 12px;
+  padding: 12px; margin: -4px 0 12px; }
+.mng-gpanel .gname { width: 100%; box-sizing: border-box; }
+.mng-gpanel .gmembers label { display: flex; gap: 10px; align-items: center;
+  padding: 8px 0; }
+.mng-gpanel .row { display: flex; gap: 10px; margin-top: 8px; }
+.mng-gpanel .row .btn { flex: 1; }
+
 /* ---------- peer recording indicator ---------- */
 #peer-rec { align-items: center; gap: 8px; margin-top: 18px;
   color: var(--danger); font-size: var(--fs-small); font-weight: 600; }

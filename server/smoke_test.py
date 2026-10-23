@@ -213,6 +213,205 @@ ok(c.post(f"/v1/messages/{mid}/ack", headers=H_G).status_code == 200, "ack")
 ok(c.delete(f"/v1/messages/{mid}", headers=H_G).status_code == 200, "delete")
 ok(c.get("/v1/inbox", headers=H_G).json() == [], "inbox empty after delete")
 
+# ================= groups (per-box broadcast lists) =================
+# papa (1) is pip-ella-01's device admin; the box's only contact is
+# grandma (3). A stranger (explicit id, removed again) proves the rule.
+from app import db as gdb, api as _api
+with gdb.conn() as cc:
+    cc.execute("""INSERT INTO users (id,username,display_name,color,
+                  password_hash,email) VALUES (99,'stranger','Stranger',
+                  '999999','','stranger@example.com')""")
+r = c.post("/v1/managed/pip-ella-01/groups",
+           json={"name": "Family", "members": ["grandma", "stranger"]})
+ok(r.status_code == 403, "group member must be a box contact (or the admin)")
+with gdb.conn() as cc:
+    cc.execute("DELETE FROM users WHERE id=99")
+ok(c.post("/v1/managed/pip-ella-01/groups",
+          json={"name": "x" * 17}).status_code == 400,
+   "group name capped at 16 characters")
+ok(c.post("/v1/managed/pip-grandma-01/groups",
+          json={"name": "Nope"}).status_code == 404,
+   "groups on a box you don't manage -> 404")
+r = c.post("/v1/managed/pip-ella-01/groups",
+           json={"name": "Family", "members": ["@grandma", "papa", "ella"]})
+ok(r.status_code == 200 and r.json()["group"]["name"] == "Family",
+   "device admin creates a group")
+grp = r.json()["group"]["id"]
+ok(re.fullmatch(r"g-[0-9a-f]{8}", grp) is not None,
+   "group id can never look like a username")
+ok(sorted(m["username"] for m in r.json()["group"]["members"])
+   == ["grandma", "papa"], "members listed; the box itself is implicit")
+for i in range(7):
+    ok(c.post("/v1/managed/pip-ella-01/groups",
+              json={"name": f"g{i}"}).status_code == 200, f"group g{i} created")
+ok(c.post("/v1/managed/pip-ella-01/groups",
+          json={"name": "ninth"}).status_code == 400, "at most 8 groups per box")
+r = c.get("/v1/managed")
+ok(any(d["device_id"] == "pip-ella-01" and d["groups"][0]["id"] == grp
+       for d in r.json()), "managed list carries the groups")
+with gdb.conn() as cc:
+    for g in gdb.all_(cc, "SELECT id FROM groups WHERE name LIKE 'g_'"):
+        ok(c.delete(f"/v1/managed/pip-ella-01/groups/{g['id']}").status_code
+           == 200, f"filler group {g['id']} deleted")
+
+# tiles: every member sees the group first; the tile is what a box
+# replies to, so it must survive the firmware's 12-slot cut
+tiles = c.get("/v1/contacts", headers=H_E).json()
+ok(tiles[0]["device_id"] == grp and tiles[0]["group"] is True
+   and tiles[0]["name"] == "Family" and tiles[1]["device_id"] == "grandma",
+   "box sees the group tile first, then its contacts")
+ok(c.get("/v1/contacts", headers=H_G).json()[0]["device_id"] == grp,
+   "member box sees the group tile")
+ok(c.get("/v1/contacts").json()[0]["device_id"] == grp,
+   "admin (phone member) sees the group tile")
+_voice._render_user(2)
+ok(any(p["key"] == f"ask_send-{grp}" for p in _voice.manifest(2)),
+   "voice prompt rendered for the group tile")
+
+# "Sender · Group" within the box's 23-byte name budget, never splitting
+# a codepoint; the group name wins when the sender can't fit
+ok(gdb.group_label("Grandmother Josephine", "Family")
+   == "Grandmother J · Family", "label clips the sender to fit")
+ok(gdb.group_label("Grandma", "Família Reis 16c") == "Família Reis 16c",
+   "label keeps the group name when the sender can't fit")
+_lab = gdb.group_label("À" * 10, "Family")
+ok(len(_lab.encode()) <= 23 and _lab.encode().decode("utf-8") == _lab
+   and _lab.endswith(" · Family"), "label never splits a multibyte char")
+
+# a group send from ella's box: one ordinary row + audio copy per other
+# member (grandma's box, papa's phone)
+r = c.post("/v1/messages", headers=H_E,
+           data={"recipient_id": grp, "duration": "4"},
+           files={"audio": ("m.vmsg", io.BytesIO(vmsg))})
+ok(r.status_code == 200 and r.json()["copies"] == 2,
+   "group send fans out to the other members")
+gorigin = r.json()["id"]
+with gdb.conn() as cc:
+    copies = gdb.all_(cc, "SELECT id, recipient, group_id, origin FROM messages "
+                          "WHERE origin=?", (gorigin,))
+ok(len(copies) == 2 and {x["recipient"] for x in copies} == {1, 3}
+   and all(x["group_id"] == grp for x in copies)
+   and len({x["id"] for x in copies}) == 2 and gorigin in {x["id"] for x in copies},
+   "one row per member, sender excluded, origin is a copy")
+ok(all(os.path.exists(gdb.audio_path(x["id"])) for x in copies),
+   "one audio file per copy")
+ok(_api._inflight == {}, "inflight reservation released after a group send")
+g_copy = next(x["id"] for x in copies if x["recipient"] == 3)
+papa_copy = next(x["id"] for x in copies if x["recipient"] == 1)
+gm = c.get("/v1/inbox", headers=H_G).json()[0]
+ok(gm["id"] == g_copy and gm["sender_id"] == grp
+   and gm["sender_name"] == "Ella · Family" and gm["from"] == "ella"
+   and gm["from_name"] == "Ella" and gm["group"]["name"] == "Family",
+   "box inbox files the copy under the group tile")
+pm = c.get("/v1/inbox").json()[0]
+ok(pm["id"] == papa_copy and pm["sender_id"] == grp and pm["from_name"] == "Ella",
+   "phone inbox carries the group and the real sender")
+_p = _notify._device_payload(g_copy)
+_d = _json.loads(_p)
+ok(_d["from"] == grp and _d["from_name"] == "Ella · Family"
+   and _d["dur"] == 4, "device notify for a group copy wears the group identity")
+ok(len(_p) < 256, f"group device notify fits the firmware buffer ({len(_p)} B)")
+ok(c.get(f"/v1/messages/{g_copy}/audio", headers=H_G).status_code == 200,
+   "a copy downloads like any message")
+ok(c.get(f"/v1/messages/{papa_copy}/audio", headers=H_G).status_code == 404,
+   "a member cannot fetch another member's copy")
+
+# caps: per (sender, group), independent of the direct channels
+for i in range(4):
+    r = c.post("/v1/messages", headers=H_E,
+               data={"recipient_id": grp, "duration": "1"},
+               files={"audio": ("m.vmsg", io.BytesIO(vmsg))})
+ok(r.status_code == 200, "five group sends within the window allowed")
+ok(c.post("/v1/messages", headers=H_E,
+          data={"recipient_id": grp, "duration": "1"},
+          files={"audio": ("m.vmsg", io.BytesIO(vmsg))}).status_code == 429,
+   "sixth group send refused (cap is per sender+group)")
+r = c.post("/v1/messages", headers=H_E,
+           data={"recipient_id": "grandma", "duration": "1"},
+           files={"audio": ("m.vmsg", io.BytesIO(vmsg))})
+ok(r.status_code == 200, "direct channel unaffected by the group cap")
+ok(c.post("/v1/messages", headers=H_E,
+          data={"recipient_id": "g-00000000", "duration": "1"},
+          files={"audio": ("m.vmsg", io.BytesIO(vmsg))}).status_code == 404,
+   "unknown group -> 404")
+
+# reactions go to the real sender; presence lights the group tile
+r = c.post("/v1/auth/verify-code", data={"email": plant_code("ella"),
+                                         "code": "123456"})
+utok_ella = {"Authorization": "Bearer " + r.json()["token"]}
+ok(c.post(f"/v1/messages/{g_copy}/reaction", headers=H_G,
+          json={"reaction": "heart"}).status_code == 200, "member reacts to a copy")
+ok(any(x["msg_id"] == g_copy and x["from"] == "grandma"
+       for x in c.get("/v1/reactions", headers=utok_ella).json()),
+   "reaction to a group copy reaches the real sender")
+c.post("/v1/reactions/seen", headers=utok_ella, json={"all": True})
+r = c.post("/v1/presence", headers=H_E, json={"to": grp, "state": "start"})
+ok(r.status_code == 200
+   and c.get("/v1/presence").json() == [{"from": grp, "from_name": "Ella"}]
+   and c.get("/v1/presence", headers=H_G).json()[0]["from"] == grp,
+   "recording to a group lights the group tile for the other members")
+c.post("/v1/presence", headers=H_E, json={"to": grp, "state": "stop"})
+ok(c.get("/v1/presence").json() == [], "stop clears group presence")
+
+# membership follows the contact list: a removed contact leaves the
+# group (and can't record or send to it), whatever path removed them
+ok(c.delete("/v1/managed/pip-ella-01/contacts/grandma").status_code == 200,
+   "device admin removes grandma from the box")
+ok(all(t["device_id"] != grp for t in c.get("/v1/contacts", headers=H_G).json()),
+   "removed contact loses the group tile")
+ok(c.post("/v1/presence", headers=H_G,
+          json={"to": grp, "state": "start"}).status_code == 403,
+   "non-member cannot record to the group")
+ok(c.post("/v1/messages", headers=H_G,
+          data={"recipient_id": grp, "duration": "1"},
+          files={"audio": ("m.vmsg", io.BytesIO(vmsg))}).status_code == 403,
+   "non-member cannot send to the group")
+ok(c.get(f"/v1/messages/{g_copy}/audio", headers=H_G).status_code == 200,
+   "copies already delivered stay fetchable")
+c.post("/admin/perms", data={"p_2_3": "on", "p_3_2": "on"})   # restore
+r = c.patch(f"/v1/managed/pip-ella-01/groups/{grp}",
+            json={"name": "Fam", "members": ["grandma"]})
+ok(r.status_code == 200 and r.json()["group"]["name"] == "Fam"
+   and [m["username"] for m in r.json()["group"]["members"]] == ["grandma"],
+   "device admin renames and replaces the members")
+ok(all(t["device_id"] != grp for t in c.get("/v1/contacts").json()),
+   "dropped member loses the tile")
+ok(c.get("/v1/inbox", headers=H_G).json()[0]["sender_name"].endswith("· Fam"),
+   "existing copies follow the rename")
+c.post("/admin/perms", data={})                   # matrix rewrite: nobody talks
+with gdb.conn() as cc:
+    left = gdb.all_(cc, "SELECT user_id FROM group_members WHERE group_id=?", (grp,))
+ok([x["user_id"] for x in left] == [2],
+   "admin perms rewrite prunes members who stopped being contacts")
+c.post("/admin/perms", data={"p_2_3": "on", "p_3_2": "on"})   # restore
+
+# the group goes: tiles vanish, copies fall back to the real sender
+ok(c.delete(f"/v1/managed/pip-ella-01/groups/{grp}").status_code == 200,
+   "device admin deletes the group")
+ok(all(t["device_id"] != grp for t in c.get("/v1/contacts", headers=H_G).json()),
+   "group tile gone")
+gm = next(x for x in c.get("/v1/inbox", headers=H_G).json() if x["id"] == g_copy)
+ok(gm["sender_id"] == "ella" and gm["sender_name"] == "Ella"
+   and gm["group"] is None, "copies of a deleted group show the real sender")
+# device deletion cascades its groups (foreign_keys=ON per connection)
+r = c.post("/admin/devices", data={"device_id": "pip-tmp-01", "user_id": 3,
+                                   "pin": "1234"})
+c.post("/admin/devices/pip-tmp-01/admin", data={"admin_id": "1"})
+r = c.post("/v1/managed/pip-tmp-01/groups", json={"name": "Tmp"})
+ok(r.status_code == 200, "group on a throwaway box")
+c.post("/admin/devices/pip-tmp-01/delete")
+with gdb.conn() as cc:
+    ok(gdb.one(cc, "SELECT COUNT(*) n FROM groups WHERE device_id='pip-tmp-01'")["n"] == 0
+       and gdb.one(cc, "SELECT COUNT(*) n FROM group_members WHERE group_id=?",
+                   (r.json()["group"]["id"],))["n"] == 0,
+       "deleting a device cascades its groups and members")
+# leave the inboxes as we found them
+for hdr in (H_G, None):
+    for m in c.get("/v1/inbox", headers=hdr).json():
+        c.delete(f"/v1/messages/{m['id']}", headers=hdr)
+ok(c.get("/v1/inbox", headers=H_G).json() == [] and c.get("/v1/inbox").json() == [],
+   "group copies deleted by their recipients")
+
 # --- analytics (stats.py): events, diag header, counters, rollup, page ---
 from app import stats as _stats, db as _adb
 with _adb.conn() as cc:
@@ -230,16 +429,29 @@ ok(_stats.route_group("/v1/messages/abc/audio.m4a") == "audio"
    and _stats.route_group("/v1/setup/nvs/xyz.bin") == "setup",
    "route groups classify paths")
 diag = {**H_G, "X-Pip-Diag": "v=9.9.9;b=amoled-1.8;r=-50;h=90000;m=30000;"
-                             "u=5000;rr=1"}
+                             "u=5000;rr=1;s=48656c6c6f20e298ba"}
 ok(c.get("/v1/inbox", headers=diag).status_code == 200, "diag header accepted")
 with _adb.conn() as cc:
     drow = _adb.one(cc, "SELECT * FROM devices WHERE id='pip-grandma-01'")
     fw_ev = _adb.one(cc, "SELECT detail FROM events WHERE kind='device.fw' "
                          "AND device_id='pip-grandma-01'")
+    ssid_leak = _adb.one(cc, "SELECT COUNT(*) n FROM events "
+                             "WHERE detail LIKE '%Hello%'")["n"]
 ok(drow["fw_version"] == "9.9.9" and drow["rssi"] == -50
    and drow["heap"] == 90000 and drow["heap_max"] == 30000
    and drow["reset"] == "poweron" and drow["boot_at"], "diag stored on device")
+ok(drow["ssid"] == "Hello ☺" and ssid_leak == 0,
+   "hex-encoded SSID decoded onto the device row, never into events")
 ok(fw_ev and fw_ev["detail"] == "? -> 9.9.9", "first firmware report logged")
+c.get("/v1/inbox", headers={**H_G, "X-Pip-Diag": "s=zz;v=9.9.9"})
+c.get("/v1/inbox", headers={**H_G, "X-Pip-Diag": "s=" + "41" * 40})
+with _adb.conn() as cc:
+    drow = _adb.one(cc, "SELECT ssid FROM devices WHERE id='pip-grandma-01'")
+ok(drow["ssid"] == "Hello ☺", "malformed or oversized SSID ignored")
+c.get("/v1/inbox", headers={**H_E, "X-Pip-Diag": "s=486f6d65"})
+ok(any(d["device_id"] == "pip-ella-01" and d["ssid"] == "Home"
+       for d in c.get("/v1/managed").json()),
+   "device admin sees the box's Wi-Fi network")
 c.get("/v1/inbox", headers={**H_G, "X-Pip-Diag": "v=9.9.9;u=10;rr=4"})
 with _adb.conn() as cc:
     boot = _adb.one(cc, "SELECT detail FROM events WHERE kind='device.boot' "

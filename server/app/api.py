@@ -450,9 +450,19 @@ def contacts(ident: Identity = AuthDep):
                              WHERE p.sender=? AND p.recipient != p.sender
                              ORDER BY u.display_name""",
                        (ident.user_id,))
+        groups = db.all_(c, """SELECT g.id, g.name, g.color
+                               FROM groups g JOIN group_members gm
+                                 ON gm.group_id=g.id
+                               WHERE gm.user_id=? ORDER BY g.name""",
+                         (ident.user_id,))
     # field named device_id for firmware compatibility; value is the username
-    return [{"device_id": r["username"], "name": r["display_name"],
-             "color": r["color"]} for r in rows]
+    # (or a group id, which a username can never look like). Groups first:
+    # a box keeps only the first UI_MAX_CONTACTS entries, and a group tile
+    # the box can't see is a message it can't reply to.
+    return ([{"device_id": g["id"], "name": g["name"], "color": g["color"],
+              "group": True} for g in groups] +
+            [{"device_id": r["username"], "name": r["display_name"],
+              "color": r["color"]} for r in rows])
 
 
 # ---------- device admin: manage a device's contact list ----------
@@ -462,6 +472,7 @@ def contacts(ident: Identity = AuthDep):
 
 def _managed_rows(c, user_id: int):
     return db.all_(c, """SELECT d.id AS device_id, d.last_seen, d.voice,
+                                d.ssid, d.rssi, d.fw_version, d.online,
                                 u.id AS uid, u.username, u.display_name
                          FROM devices d JOIN users u ON u.id=d.user_id
                          WHERE d.admin_id=? ORDER BY d.id""", (user_id,))
@@ -522,11 +533,194 @@ def managed_list(ident: Identity = AuthDep):
             out.append({"device_id": r["device_id"], "username": r["username"],
                         "name": r["display_name"],
                         "last_seen": r["last_seen"],   # setup page: "online?"
+                        "online": bool(r["online"]),
+                        "fw_version": r["fw_version"],
+                        # the box's vitals, for "why did it go quiet": the
+                        # device admin is the only reader of the SSID
+                        "ssid": r["ssid"], "rssi": r["rssi"],
                         "voice": bool(r["voice"]),     # accessibility toggle
                         "contacts": [{"username": x["username"],
                                       "name": x["display_name"],
-                                      "color": x["color"]} for x in contacts]})
+                                      "color": x["color"]} for x in contacts],
+                        "groups": _groups_of_device(c, r["device_id"])})
     return out
+
+
+# ---------- device admin: groups ----------
+# A group is a per-box broadcast list the device admin curates from the
+# box's existing contacts (plus themselves; the box user is always in).
+# Membership is the permission: any member may send to the group, and a
+# send becomes one ordinary message row + audio copy per other member
+# (_ingest). To every client a group is just another contact whose id
+# can't be a username (g-xxxxxxxx), so the firmware needs nothing new: a
+# group message arrives as "Sender · Group" from the group's tile and
+# Reply records back to the group.
+GROUP_NAME_MAX_CHARS = 16
+GROUP_NAME_MAX_BYTES = 20      # "Sender · Group" must fit the box's 23 B
+GROUPS_PER_DEVICE = 8
+GROUP_COLORS = ["FFB300", "26A69A", "7E57C2", "EF5350",
+                "42A5F5", "8D6E63", "66BB6A", "EC407A"]
+
+
+def _new_group_id(c) -> str:
+    for _ in range(3):
+        gid = "g-" + secrets.token_hex(4)
+        if not db.one(c, "SELECT 1 FROM groups WHERE id=?", (gid,)):
+            return gid
+    raise HTTPException(500, "could not allocate a group id")
+
+
+def _group_name(raw) -> str:
+    name = " ".join(str(raw or "").split())
+    if not name or len(name) > GROUP_NAME_MAX_CHARS \
+            or len(name.encode()) > GROUP_NAME_MAX_BYTES:
+        raise HTTPException(400, f"group name must be 1-{GROUP_NAME_MAX_CHARS}"
+                                 " characters")
+    return name
+
+
+def _group_dict(c, g, box_uid: int) -> dict:
+    members = db.all_(c, """SELECT u.username, u.display_name, u.color
+                            FROM group_members gm JOIN users u ON u.id=gm.user_id
+                            WHERE gm.group_id=? AND gm.user_id != ?
+                            ORDER BY u.display_name""", (g["id"], box_uid))
+    return {"id": g["id"], "name": g["name"], "color": g["color"],
+            "members": [{"username": m["username"], "name": m["display_name"],
+                         "color": m["color"]} for m in members]}
+
+
+def _groups_of_device(c, device_id: str) -> list:
+    dev = db.one(c, "SELECT user_id FROM devices WHERE id=?", (device_id,))
+    if not dev:
+        return []
+    rows = db.all_(c, """SELECT id, name, color FROM groups
+                         WHERE device_id=? ORDER BY created""", (device_id,))
+    return [_group_dict(c, g, dev["user_id"]) for g in rows]
+
+
+def _group_of_device(c, device_id: str, gid: str):
+    g = db.one(c, "SELECT id, name, color FROM groups WHERE id=? AND device_id=?",
+               (gid, device_id)) if db.is_group_id(gid) else None
+    if not g:
+        raise HTTPException(404, "no such group")
+    return g
+
+
+def _group_member_ids(c, gid: str) -> list:
+    return [r["user_id"] for r in db.all_(
+        c, "SELECT user_id FROM group_members WHERE group_id=?", (gid,))]
+
+
+def _group_for_send(c, gid: str, user_id: int):
+    """The group row and its member ids, for a sender who must belong."""
+    g = db.one(c, "SELECT id, name, color FROM groups WHERE id=?", (gid,))
+    if not g:
+        raise HTTPException(404, "unknown recipient")
+    members = _group_member_ids(c, gid)
+    if user_id not in members:
+        raise HTTPException(403, "not a member of this group")
+    return g, members
+
+
+def _validate_members(c, dev, ident: Identity, usernames) -> list:
+    """Usernames -> user ids. Each must be the device admin or a current
+    contact of the box (perms box -> user): a group never reaches anyone
+    the box couldn't message directly. The box itself is implicit."""
+    if not isinstance(usernames, list) or len(usernames) > 32:
+        raise HTTPException(400, "members must be a list of @usernames")
+    ids = []
+    for raw in usernames:
+        handle = str(raw).strip().lstrip("@").lower()
+        u = db.one(c, "SELECT id FROM users WHERE username=?", (handle,))
+        if not u:
+            raise HTTPException(404, f"no user called @{handle}")
+        if u["id"] == dev["user_id"]:
+            continue
+        if u["id"] != ident.user_id and not db.one(
+                c, "SELECT 1 FROM perms WHERE sender=? AND recipient=?",
+                (dev["user_id"], u["id"])):
+            raise HTTPException(403, f"@{handle} is not one of this box's "
+                                     "contacts")
+        if u["id"] not in ids:
+            ids.append(u["id"])
+    return ids
+
+
+def _set_members(c, gid: str, box_uid: int, member_ids) -> None:
+    c.execute("DELETE FROM group_members WHERE group_id=?", (gid,))
+    for uid in [box_uid, *member_ids]:
+        c.execute("INSERT OR IGNORE INTO group_members VALUES (?,?)", (gid, uid))
+
+
+def _groups_changed(*user_ids: int) -> None:
+    """Boxes refetch /contacts (the group is a tile), and a voice box may
+    need an 'ask_send-<group>' clip."""
+    _notify_contacts_changed(*user_ids)
+    voice.ensure_all()
+
+
+@router.get("/managed/{device_id}/groups")
+def managed_groups(device_id: str, ident: Identity = AuthDep):
+    with db.conn() as c:
+        _managed_device(c, device_id, ident)
+        return _groups_of_device(c, device_id)
+
+
+@router.post("/managed/{device_id}/groups")
+def managed_group_create(device_id: str, ident: Identity = AuthDep,
+                         body: dict = Body(...)):
+    name = _group_name(body.get("name"))
+    with db.conn() as c:
+        dev = _managed_device(c, device_id, ident)
+        n = db.one(c, "SELECT COUNT(*) n FROM groups WHERE device_id=?",
+                   (device_id,))["n"]
+        if n >= GROUPS_PER_DEVICE:
+            raise HTTPException(400, f"a box can have at most "
+                                     f"{GROUPS_PER_DEVICE} groups")
+        members = _validate_members(c, dev, ident, body.get("members", []))
+        gid = _new_group_id(c)
+        color = body.get("color")
+        if not isinstance(color, str) or not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+            color = GROUP_COLORS[n % len(GROUP_COLORS)]
+        c.execute("INSERT INTO groups (id, device_id, name, color) VALUES (?,?,?,?)",
+                  (gid, device_id, name, color.upper()))
+        _set_members(c, gid, dev["user_id"], members)
+        out = _group_dict(c, {"id": gid, "name": name, "color": color.upper()},
+                          dev["user_id"])
+    _groups_changed(dev["user_id"], *members)
+    return {"ok": True, "group": out}
+
+
+@router.patch("/managed/{device_id}/groups/{gid}")
+def managed_group_update(device_id: str, gid: str, ident: Identity = AuthDep,
+                         body: dict = Body(...)):
+    """Rename and/or replace the member set."""
+    with db.conn() as c:
+        dev = _managed_device(c, device_id, ident)
+        g = _group_of_device(c, device_id, gid)
+        before = set(_group_member_ids(c, gid))
+        if "name" in body:
+            name = _group_name(body.get("name"))
+            c.execute("UPDATE groups SET name=? WHERE id=?", (name, gid))
+            g = {"id": gid, "name": name, "color": g["color"]}
+        if "members" in body:
+            members = _validate_members(c, dev, ident, body.get("members"))
+            _set_members(c, gid, dev["user_id"], members)
+        after = set(_group_member_ids(c, gid))
+        out = _group_dict(c, g, dev["user_id"])
+    _groups_changed(*(before | after))
+    return {"ok": True, "group": out}
+
+
+@router.delete("/managed/{device_id}/groups/{gid}")
+def managed_group_delete(device_id: str, gid: str, ident: Identity = AuthDep):
+    with db.conn() as c:
+        dev = _managed_device(c, device_id, ident)
+        _group_of_device(c, device_id, gid)
+        members = _group_member_ids(c, gid)
+        c.execute("DELETE FROM groups WHERE id=?", (gid,))   # members cascade
+    _groups_changed(dev["user_id"], *members)
+    return {"ok": True}
 
 
 @router.post("/managed/{device_id}/voice")
@@ -608,7 +802,11 @@ def managed_remove(device_id: str, username: str, ident: Identity = AuthDep):
                                           OR (sender=? AND recipient=?)""",
                   (dev["user_id"], target["id"],
                    target["id"], dev["user_id"]))
+        # no longer a contact of the box = out of its groups too (the
+        # admin stays eligible: prune_group_members knows the rule)
+        db.prune_group_members(c)
     _notify_contacts_changed(dev["user_id"], target["id"])
+    voice.ensure_all()
     return {"ok": True}
 
 
@@ -775,7 +973,7 @@ def _write_audio(msg_id: str, data: bytes) -> None:
 # thread pool while holding a few MB. In-memory, single worker (like the
 # rate limiter and presence). Touched only between awaits of the async
 # handler, so no lock.
-_inflight: dict[tuple[int, int], int] = {}
+_inflight: dict[tuple[int, object], int] = {}   # (sender, user id | group id)
 MAX_INFLIGHT_PER_SENDER = 2     # a client sends one recording at a time
 
 
@@ -791,27 +989,48 @@ async def send_message(bg: BackgroundTasks,
                        audio: UploadFile = None):
     if audio is None:
         raise HTTPException(400, "audio file required")
+    group = None
     with db.conn() as c:
-        rcpt = db.one(c, "SELECT id FROM users WHERE username=?", (recipient_id,))
-        if not rcpt:
-            raise HTTPException(404, "unknown recipient")
-        allowed = db.one(c, "SELECT 1 FROM perms WHERE sender=? AND recipient=?",
-                         (ident.user_id, rcpt["id"]))
-        if not allowed:
-            raise HTTPException(403, "not permitted to message this user")
-        # checked before the audio is even read. Both clients tell the
-        # user to wait and drop the message: the box also counts its own
-        # sends (limits come from GET /device) so it normally refuses to
-        # record at all rather than reaching this.
-        recent = db.one(c, f"""SELECT COUNT(*) n FROM messages
-                               WHERE sender=? AND recipient=?
-                                 AND created > datetime('now','-{RATE_WINDOW_MIN} minutes')""",
-                        (ident.user_id, rcpt["id"]))["n"]
-        pair = (ident.user_id, rcpt["id"])
+        if db.is_group_id(recipient_id):
+            # a group: every other member gets a copy. Membership is the
+            # permission (the device admin curated it from the box's own
+            # contacts), and the send cap is per (sender, group) - a group
+            # send must not eat into any member's direct channel, nor the
+            # other way round (the direct query below skips group copies).
+            group, members = _group_for_send(c, recipient_id, ident.user_id)
+            rcpt_ids = [m for m in members if m != ident.user_id]
+            if not rcpt_ids:
+                raise HTTPException(400, "nobody else is in this group yet")
+            recent = db.one(c, f"""SELECT COUNT(DISTINCT origin) n FROM messages
+                                   WHERE sender=? AND group_id=?
+                                     AND created > datetime('now','-{RATE_WINDOW_MIN} minutes')""",
+                            (ident.user_id, recipient_id))["n"]
+            pair = (ident.user_id, recipient_id)
+            what = group["name"]
+        else:
+            rcpt = db.one(c, "SELECT id FROM users WHERE username=?",
+                          (recipient_id,))
+            if not rcpt:
+                raise HTTPException(404, "unknown recipient")
+            allowed = db.one(c, "SELECT 1 FROM perms WHERE sender=? AND recipient=?",
+                             (ident.user_id, rcpt["id"]))
+            if not allowed:
+                raise HTTPException(403, "not permitted to message this user")
+            rcpt_ids = [rcpt["id"]]
+            # checked before the audio is even read. Both clients tell the
+            # user to wait and drop the message: the box also counts its own
+            # sends (limits come from GET /device) so it normally refuses to
+            # record at all rather than reaching this.
+            recent = db.one(c, f"""SELECT COUNT(*) n FROM messages
+                                   WHERE sender=? AND recipient=? AND group_id IS NULL
+                                     AND created > datetime('now','-{RATE_WINDOW_MIN} minutes')""",
+                            (ident.user_id, rcpt["id"]))["n"]
+            pair = (ident.user_id, rcpt["id"])
+            what = "this contact"
         if recent + _inflight.get(pair, 0) >= RATE_MSGS:
             raise HTTPException(
-                429, f"wait {RATE_WINDOW_MIN} mins before sending this "
-                     f"contact a new message (max {RATE_MSGS} per "
+                429, f"wait {RATE_WINDOW_MIN} mins before sending "
+                     f"{what} a new message (max {RATE_MSGS} per "
                      f"{RATE_WINDOW_MIN} mins)")
         if _inflight_for(ident.user_id) >= MAX_INFLIGHT_PER_SENDER:
             raise HTTPException(429, "another message is still uploading - "
@@ -820,8 +1039,8 @@ async def send_message(bg: BackgroundTasks,
     # both caps, whatever happens to it
     _inflight[pair] = _inflight.get(pair, 0) + 1
     try:
-        return await _ingest(bg, ident, rcpt["id"], recipient_id, duration,
-                             audio)
+        return await _ingest(bg, ident, rcpt_ids, recipient_id, duration,
+                             audio, group)
     finally:
         left = _inflight[pair] - 1
         if left:
@@ -830,8 +1049,14 @@ async def send_message(bg: BackgroundTasks,
             del _inflight[pair]
 
 
-async def _ingest(bg: BackgroundTasks, ident: Identity, rcpt_id: int,
-                  recipient_id: str, duration: int, audio: UploadFile):
+async def _ingest(bg: BackgroundTasks, ident: Identity, rcpt_ids: list,
+                  recipient_id: str, duration: int, audio: UploadFile,
+                  group=None):
+    """One upload -> one message row + one audio file per recipient (a
+    direct send is the one-recipient case, unchanged on the wire). Copies
+    rather than a shared file: every row then lives and dies by the rules
+    that already exist (delete-on-delivery, age-out, orphan sweep,
+    drop_audio), and nothing downstream has to know about groups."""
     data = await audio.read()
     if len(data) > MAX_AUDIO_BYTES:
         raise HTTPException(413, "audio too large")
@@ -861,25 +1086,37 @@ async def _ingest(bg: BackgroundTasks, ident: Identity, rcpt_id: int,
             raise HTTPException(400, str(e))
 
     # ms-timestamp prefix + random suffix: still 32 hex chars, but ids sort
-    # chronologically - device inbox ordering relies on this (storage.c)
-    msg_id = f"{int(time.time() * 1000):016x}{secrets.token_hex(8)}"
-    await asyncio.to_thread(_write_audio, msg_id, data)
+    # chronologically - device inbox ordering relies on this (storage.c).
+    # All copies minted now, so they share the instant.
+    stamp = f"{int(time.time() * 1000):016x}"
+    ids = [stamp + secrets.token_hex(8) for _ in rcpt_ids]
+    origin = ids[0]
+    # every copy on disk before any row exists: a notify is a promise the
+    # bytes are fetchable, and the rows are what make a notify possible
+    for mid in ids:
+        await asyncio.to_thread(_write_audio, mid, data)
+    gid = group["id"] if group else None
     with db.conn() as c:
-        c.execute("""INSERT INTO messages (id,sender,recipient,duration)
-                     VALUES (?,?,?,?)""",
-                  (msg_id, ident.user_id, rcpt_id, duration))
+        for rcpt_id, mid in zip(rcpt_ids, ids):
+            c.execute("""INSERT INTO messages
+                         (id,sender,recipient,duration,group_id,origin)
+                         VALUES (?,?,?,?,?,?)""",
+                      (mid, ident.user_id, rcpt_id, duration, gid,
+                       origin if gid else None))
     stats.event("msg.sent", dim="box" if ident.device_id else "phone",
                 user_id=ident.user_id, device_id=ident.device_id,
-                msg_id=msg_id, value=duration, detail=recipient_id)
+                msg_id=origin, value=duration, detail=recipient_id)
     stats.count("user.sent", ident.user_id)
-    stats.count("user.recv", rcpt_id)
+    for rcpt_id in rcpt_ids:
+        stats.count("user.recv", rcpt_id)
     # After the response, in a worker thread: notifying means a webpush per
     # subscription at up to 10 s each, and the sender has no reason to wait
     # on it. The audio and the row are already in place, so the promise a
     # notify makes still holds the moment it fires.
-    bg.add_task(notify.message_created, rcpt_id, msg_id,
-                ident.display_name)
-    return {"id": msg_id}
+    for rcpt_id, mid in zip(rcpt_ids, ids):
+        bg.add_task(notify.message_created, rcpt_id, mid,
+                    ident.display_name, group["name"] if group else None)
+    return {"id": origin, "copies": len(ids)}
 
 
 # ---------- inbox ----------
@@ -888,17 +1125,36 @@ def inbox(ident: Identity = AuthDep):
     with db.conn() as c:
         rows = db.all_(c, """SELECT m.id, m.duration, m.created, m.delivered,
                                     u.username, u.display_name, u.color,
-                                    r.reaction
+                                    r.reaction,
+                                    g.id AS gid, g.name AS gname,
+                                    g.color AS gcolor
                              FROM messages m JOIN users u ON u.id=m.sender
                              LEFT JOIN reactions r ON r.msg_id=m.id
+                             LEFT JOIN groups g ON g.id=m.group_id
                              WHERE m.recipient=? ORDER BY m.created DESC""",
                        (ident.user_id,))
-    return [{"id": r["id"], "sender_id": r["username"],
+    out = []
+    for r in rows:
+        m = {"id": r["id"], "sender_id": r["username"],
              "sender_name": r["display_name"], "sender_color": r["color"],
+             "from": r["username"], "from_name": r["display_name"],
+             "group": None,
              "when": _fmt_when(r["created"]), "ts": _epoch(r["created"]),
              "duration": r["duration"], "delivered": bool(r["delivered"]),
              "reaction": r["reaction"] or ""}
-            for r in rows]
+        if r["gid"]:
+            # a group copy wears the group's identity: the box files it
+            # under the group tile and Reply goes back to the group. The
+            # real sender rides in from/from_name for clients that show
+            # both. A deleted group falls back to a plain direct message.
+            m.update({"sender_id": r["gid"],
+                      "sender_name": db.group_label(r["display_name"],
+                                                    r["gname"]),
+                      "sender_color": r["gcolor"],
+                      "group": {"id": r["gid"], "name": r["gname"],
+                                "color": r["gcolor"]}})
+        out.append(m)
+    return out
 
 
 def _owned_message(ident: Identity, msg_id: str):

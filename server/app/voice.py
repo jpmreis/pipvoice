@@ -104,6 +104,14 @@ def _phrase_table(user_id: int) -> dict[str, str]:
     for r in rows:
         table[f"ask_send-{r['username']}"] = \
             ASK_SEND.format(name=r["display_name"])
+    # groups are tiles too (api.contacts): the box asks by the tile id
+    with db.conn() as c:
+        groups = db.all_(c, """SELECT g.id, g.name FROM groups g
+                               JOIN group_members gm ON gm.group_id=g.id
+                               WHERE gm.user_id=? ORDER BY g.name""",
+                         (user_id,))
+    for g in groups:
+        table[f"ask_send-{g['id']}"] = ASK_SEND.format(name=g["name"])
     return table
 
 

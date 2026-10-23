@@ -47,7 +47,9 @@ presence, but the layout is the same)*
   `PIP_RELEASE_MANIFEST` at their own fork's builds).
 - **Family admin**: web admin for users, device provisioning, and an
   n-to-n permissions matrix deciding who can message whom. A box can have
-  a *device admin* — a phone user who manages that box's contacts.
+  a *device admin* — a phone user who manages that box's contacts, sets
+  up groups (one message to several people at once) and can see which
+  Wi-Fi network the box is on.
 
 ## Required hardware
 
