@@ -66,10 +66,12 @@ firewall (22/80/443/8883), and starts everything under systemd.
 
    That generates the NVS partition, builds, and flashes firmware +
    identity in one go. Identity and secrets live in NVS, so one firmware
-   build serves all devices.
+   build serves all devices of the same model (the model is baked in at
+   provisioning; see the supported boards in the root README).
 5. *Firmware*: **Fetch latest release** pulls the newest published
-   build (app + bootloader + partition table, sha256-verified) from the
-   project's GitHub Releases. Mark it **active** — an MQTT notify
+   release (app + bootloader + partition table per board model,
+   sha256-verified) from the project's GitHub Releases. Mark it
+   **active** per model — an MQTT notify
    updates online devices within a minute; offline devices catch up via
    the daily check on reconnect. The same activation makes installed
    PWAs refresh themselves. (Developers shipping their own builds POST

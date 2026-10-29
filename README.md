@@ -2,8 +2,9 @@
 
 **Pip** is a family voice-message device: kids and grandparents exchange short voice
 notes on a dedicated gadget — no apps, no accounts on their end, no
-strangers. Built on the Waveshare ESP32-S3 Touch AMOLED 1.8" board with a
-tiny self-hosted store-and-forward server. Family members without a box
+strangers. Runs on three Waveshare ESP32-S3 Touch AMOLED boards (1.8"
+rectangle, 1.75" round, 2.16" square) with a tiny self-hosted
+store-and-forward server. Family members without a box
 join from their phone through an installable PWA served by the same server.
 
 Open source under the **GNU AGPL-3.0**, with a closed-contribution
@@ -55,9 +56,25 @@ presence, but the layout is the same)*
 
 | Role | Hardware |
 |---|---|
-| Voice box | [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm) — 368×448 touch AMOLED, mic + speaker (ES8311 codec), AXP2101 PMU, USB-C. Both board revisions work (V1: SH8601/FT3168; V2: CO5300/CST820). Battery optional: boxes are designed to live on a charger, and the battery UI hides itself when no cell is present. No enclosure required — the bare board is usable as-is. |
+| Voice box | One of the three Waveshare boards below — all ESP32-S3R8 (16 MB flash, 8 MB PSRAM), touch AMOLED, mic + speaker, AXP2101 PMU, USB-C. Battery optional: boxes are designed to live on a charger, and the battery UI hides itself when no cell is present. |
 | Server | Any small VPS (production runs a €7/mo Hetzner instance on Ubuntu 24.04) plus a domain name for TLS. One `setup.sh` installs everything. |
 | Phone users | Nothing — the PWA installs from the browser (Add to Home Screen). |
+
+### Supported boards
+
+One firmware release ships a build for every model; the server only
+ever offers a box the binaries for the model it was provisioned as, so
+mixed fleets are fine. Pick the model on the setup page when flashing.
+
+| Model | Board | Screen | Notes |
+|---|---|---|---|
+| `amoled-1.8` | [ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm) | 368×448 rectangle | The original Pip, in production since day one. Bare board, no enclosure needed. Both revisions work (V1: SH8601/FT3168; V2: CO5300/CST820, quieter speaker). Analog mic on the ES8311 codec. |
+| `amoled-1.75b` | [ESP32-S3-Touch-AMOLED-1.75-B](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm) | 466×466 round | Comes cased, with side buttons; circle-aware UI layouts. Dual-mic ES7210 array. The speaker ships **unplugged** inside the case — plug its lead into the header marked SPK before first boot. |
+| `amoled-2.16` | [ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) | 480×480 square | The big one: same anatomy as the 1.8, scaled up. Dual-mic ES7210 array. Its Wi-Fi reception is noticeably weaker than the other two (chip antenna shadowed by the panel) — keep it near the router. |
+
+The 1.75" and 2.16" are bench-tested (display, touch, mic, speaker,
+sync, voice control) but the 1.8" is the one with months of daily
+family use behind it.
 
 ## How it works
 
@@ -101,18 +118,24 @@ phone user, and the permissions matrix governs people, not hardware.
    (app + Mosquitto + Caddy) on any small box, or the bare-VPS script
    path in `server/SETUP.md`. Hard requirement either way: a real
    domain with HTTPS.
-3. **Firmware**: needs ESP-IDF ≥ 5.4 with component-registry access
-   (fetches the Waveshare BSP; libopus builds from the git submodule —
-   clone with `--recurse-submodules`).
+3. **Firmware**: needs ESP-IDF with component-registry access (fetches
+   the Waveshare BSP for the chosen board; libopus builds from the git
+   submodule — clone with `--recurse-submodules`). The 1.8" builds on
+   IDF v5.4.x, the 1.75-B and 2.16 on v5.5.x (their BSPs need it).
+   Releases are built by CI for all three boards from the tag, so a
+   local build is only needed for development.
 
    ```bash
    cd firmware
-   idf.py set-target esp32s3 && idf.py build
+   idf.py set-target esp32s3 && idf.py build          # amoled-1.8 (default)
+   idf.py -B build-amoled-1.75b -DPIP_BOARD=amoled-1.75b build
+   idf.py -B build-amoled-2.16  -DPIP_BOARD=amoled-2.16  build
    ```
 4. **A new device**: PWA → Settings → **"Set up a new Pip"** flashes a
-   blank board straight from Chrome/Edge over Web Serial — creates the
-   device user, generates its identity, flashes bootloader + firmware —
-   then on-device WiFi setup via QR. (Manual alternative: provision in
+   blank board straight from Chrome/Edge over Web Serial — pick the
+   board model, and it creates the device user, generates its identity,
+   flashes bootloader + that model's firmware — then on-device WiFi
+   setup via QR. (Manual alternative: provision in
    the admin → copy the NVS CSV → `./flash_device.sh pip-ella-01.csv`;
    walkthrough in `server/SETUP.md`.)
 

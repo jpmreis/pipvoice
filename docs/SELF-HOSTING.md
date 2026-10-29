@@ -64,8 +64,10 @@ requirements, same result.
    `server/env.example`).
 3. *Permissions* — tick who can talk to whom.
 4. *Firmware* — press **Fetch latest release**: the server pulls the
-   newest published build from this repo's GitHub Releases
-   (sha256-verified). **Activate** it.
+   newest published release from this repo's GitHub Releases
+   (sha256-verified, one build per supported board model). **Activate**
+   it for each model you own — the setup page only offers a model once
+   it has an active firmware.
 5. **Flash a box** — from a desktop Chrome/Edge: PWA → Settings →
    "Set up a new Pip". The flasher writes your server's URL into the
    device; the **Server URL** field is prefilled with the site you're
