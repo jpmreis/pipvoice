@@ -11,7 +11,7 @@ idf_component_register(
         "ui/ui_settings.c" "ui/ui_theme_picker.c"
         "ui/ui_wifi_setup.c" "ui/ui_splash.c" "ui/ui_offline.c"
         "ui/ui_ambient.c" "ui/ui_voice.c"
-        "ui/ui_react.c"
+        "ui/ui_react.c" "ui/ui_delete_all.c"
         "ui/assets/emoji_heart.c" "ui/assets/emoji_up.c"
         "ui/assets/emoji_down.c" "ui/assets/emoji_joy.c"
     INCLUDE_DIRS "." "ui"

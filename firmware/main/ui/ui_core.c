@@ -40,6 +40,7 @@ void nav_to(ui_screen_id_t id, lv_screen_load_anim_t anim)
             break;
         case SCR_PINPAD:       scr_pinpad_reset();         break;
         case SCR_THEME_PICKER: scr_theme_picker_refresh(); break;
+        case SCR_DELETE_ALL:   scr_delete_all_refresh();   break;
         default: break;
     }
     s_cur = id;
@@ -65,6 +66,7 @@ void ui_init(const ui_callbacks_t *cbs)
     s_screens[SCR_SPLASH]     = scr_splash_create();
     s_screens[SCR_AMBIENT]    = scr_ambient_create();
     s_screens[SCR_VOICE]      = scr_voice_create();
+    s_screens[SCR_DELETE_ALL] = scr_delete_all_create();
 
     scr_home_refresh();
     lv_screen_load(s_screens[SCR_HOME]);

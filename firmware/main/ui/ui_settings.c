@@ -61,6 +61,16 @@ static void wifi_clicked(lv_event_t *e)
     ui_open_wifi_setup();
 }
 
+static void delete_all_clicked(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if (g_ui.inbox_count == 0) {
+        ui_toast("No messages to delete", COL_TEXT_DIM);
+        return;
+    }
+    nav_to(SCR_DELETE_ALL, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
 static lv_obj_t *mk_slider_row(lv_obj_t *parent, const char *name,
                                int32_t min, int32_t max, int32_t val,
                                lv_event_cb_t cb, lv_obj_t **slider_out)
@@ -124,6 +134,13 @@ lv_obj_t *scr_settings_create(void)
     lv_obj_t *wifi = mk_button(col, LV_SYMBOL_WIFI "  WiFi setup",
                                COL_SURFACE2, wifi_clicked, NULL);
     lv_obj_set_width(wifi, LV_PCT(100));
+
+    /* destructive: red text on the plain surface, then a confirm screen
+     * with the new/heard counts (ui_delete_all.c) */
+    lv_obj_t *del = mk_button(col, LV_SYMBOL_TRASH "  Delete all messages",
+                              COL_SURFACE, delete_all_clicked, NULL);
+    lv_obj_set_style_text_color(del, COL_DANGER, 0);
+    lv_obj_set_width(del, LV_PCT(100));
 
     lv_obj_t *about = lv_label_create(col);
     lv_label_set_text_fmt(about, "Pip v%s",

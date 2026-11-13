@@ -67,7 +67,7 @@ extern ui_state_t g_ui;
 typedef enum {
     SCR_HOME, SCR_RECORD, SCR_INBOX, SCR_PLAYBACK,
     SCR_PINPAD, SCR_SETTINGS, SCR_THEME_PICKER, SCR_WIFI_SETUP, SCR_SPLASH,
-    SCR_AMBIENT, SCR_VOICE,
+    SCR_AMBIENT, SCR_VOICE, SCR_DELETE_ALL,
     SCR_COUNT,
 } ui_screen_id_t;
 
@@ -92,6 +92,9 @@ lv_obj_t *scr_pinpad_create(void);   void scr_pinpad_reset(void);
 void scr_pinpad_arm(void (*on_ok)(void));
 lv_obj_t *scr_settings_create(void);
 lv_obj_t *scr_theme_picker_create(void); void scr_theme_picker_refresh(void);
+/* "Delete all messages?" confirmation (ui_delete_all.c); refresh recounts
+ * new/heard from g_ui.inbox */
+lv_obj_t *scr_delete_all_create(void); void scr_delete_all_refresh(void);
 
 /* re-apply background image + on-bg text colors (theme changed) */
 void scr_home_apply_theme(void);

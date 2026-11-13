@@ -148,6 +148,23 @@ static void cb_delete(const char *msg_id)
     sync_kick();
 }
 
+static void cb_delete_all(void)
+{
+    /* UI-task caller (LVGL lock held, like cb_delete): no network here.
+     * Each message gets the same unlink + trash marker as a single delete,
+     * so deliver_one skips it until drain_trash has told the server and
+     * the reconcile pass can't bring it back. */
+    static ui_message_t list[UI_MAX_MESSAGES];
+    uint8_t n = storage_load_inbox(list, UI_MAX_MESSAGES);
+    for (uint8_t i = 0; i < n; i++) {
+        storage_inbox_delete(list[i].id);
+        storage_trash_add(list[i].id);
+    }
+    ESP_LOGI(TAG, "delete all: %u messages queued for server delete", n);
+    reload_inbox_ui();
+    sync_kick();
+}
+
 static void cb_heard(const char *msg_id)
 {
     storage_inbox_mark_heard(msg_id);
@@ -493,6 +510,7 @@ void app_main(void)
         .play_message = cb_play,
         .stop_playback = cb_stop_playback,
         .delete_message = cb_delete,
+        .delete_all_messages = cb_delete_all,
         .message_heard = cb_heard,
         .inbox_opened = cb_inbox_opened,
         .react = cb_react,

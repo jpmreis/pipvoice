@@ -91,6 +91,9 @@ typedef struct {
     void (*play_message)(const char *msg_id);
     void (*stop_playback)(void);
     void (*delete_message)(const char *msg_id);
+    /* Settings -> Delete all (after the confirm screen): every inbox
+     * message, same local-delete + queued server-delete as one message */
+    void (*delete_all_messages)(void);
     void (*message_heard)(const char *msg_id);  /* mark heard / ack        */
     void (*inbox_opened)(void);             /* inbox screen shown (pull)   */
     /* reactions */

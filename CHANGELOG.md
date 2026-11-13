@@ -10,6 +10,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/). The release
 workflow copies a version's section into the GitHub Release notes, so
 write entries for humans.
 
+## [1.4.1] — 2026-11-13
+
+A way to empty a box's inbox in one go.
+
+### Added
+- **Delete all messages (box).** Settings, behind the PIN as always, has
+  a new red "Delete all messages" entry. It opens a confirmation screen
+  that shows how many messages would go, split into new and already
+  heard, with Cancel and Delete side by side. Deleting removes every
+  message from the box and queues the same server-side delete that a
+  single Delete does, so nothing comes back on the next sync. With an
+  empty inbox the entry just says so.
+
 ## [1.4.0] — 2026-10-23
 
 Groups: one message to several people at once. And the grown-up who
